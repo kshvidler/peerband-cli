@@ -1,0 +1,12 @@
+PeerBand
+Copyright 2026 Kirill Shvidler
+
+This is an unofficial project, not affiliated with Herdr or Amazon.
+The Herdr protocol schema fixture is derived from herdrdev/herdr 0.9.3,
+copyright its contributors, under Apache License 2.0.
+https://github.com/herdrdev/herdr
+
+Original project code is licensed under Apache License 2.0.
+Bundled dependencies (ws, ajv, ajv-formats) retain their own licenses; see
+package-lock.json and the corresponding package license files. Herdr and
+Amazon names identify integration targets and do not imply endorsement.

@@ -1,0 +1,9 @@
+node_modules
+dist
+coverage
+*.tgz
+.env*
+
+# Local agent reports and review captures (not part of the public repo)
+docs/phase*-report.md
+docs/local/

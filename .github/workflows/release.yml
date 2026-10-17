@@ -1,0 +1,115 @@
+name: release
+# Manual releases only. A tag push is deliberately NOT a trigger: the release
+# tag points at a commit that contains the built dist/ (which is gitignored on
+# main), so the tag has to be created by this workflow, and a workflow that
+# reacts to its own tag push would loop or race. Run it from main with the
+# version that is already in package.json.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to release (must equal package.json version, e.g. 0.1.0)
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: release
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Check requested version matches package.json
+        env:
+          REQUESTED: ${{ inputs.version }}
+        run: |
+          actual=$(node -p "require('./package.json').version")
+          if [ "$REQUESTED" != "$actual" ]; then
+            echo "::error::Requested version $REQUESTED does not match package.json version $actual"
+            exit 1
+          fi
+      - run: npm ci
+      - run: npm run check
+  tag:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Commit dist/ on a detached HEAD and push only the tag
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "::error::Tag v$VERSION already exists"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --detach
+          git add -f dist
+          git commit -m "Release v$VERSION"
+          git tag -a "v$VERSION" -m "Release v$VERSION"
+          git push origin "refs/tags/v$VERSION"
+  publish:
+    needs: tag
+    # Trusted publishing needs a public repository (npm provenance requirement).
+    if: github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ inputs.version }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: npm install -g npm@^11.5.1
+      # No NPM_TOKEN: npm trusted publishing (OIDC) authenticates this job and
+      # attaches provenance automatically.
+      - run: npm publish --access public
+  github-release:
+    needs: tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ inputs.version }}
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          (cd install && sha256sum install.sh install.ps1) > SHA256SUMS
+          cat SHA256SUMS
+          gh release create "v$VERSION" install/install.sh install/install.ps1 SHA256SUMS \
+            --title "PeerBand v$VERSION" --generate-notes --verify-tag
+  notice:
+    needs: tag
+    if: github.event.repository.private == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - run: echo "::notice title=npm publish skipped::The repository is private, so the publish job was skipped. Make the repository public and re-run to publish."

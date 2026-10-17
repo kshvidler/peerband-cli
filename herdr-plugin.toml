@@ -1,0 +1,36 @@
+id = "peerband"
+name = "PeerBand"
+version = "0.1.0"
+min_herdr_version = "0.9.3"
+description = "Reach your Herdr agents from any MCP client through your PeerBand account"
+platforms = ["linux", "macos", "windows"]
+
+[[startup]]
+command = ["node", "herdr/launch.mjs", "open-pane"]
+
+[[actions]]
+id = "start"
+title = "Start PeerBand Relay"
+command = ["node", "herdr/launch.mjs", "lifecycle", "start"]
+
+[[actions]]
+id = "status"
+title = "PeerBand Relay status"
+command = ["node", "herdr/launch.mjs", "lifecycle", "status"]
+
+[[actions]]
+id = "stop"
+title = "Stop PeerBand Relay"
+command = ["node", "herdr/launch.mjs", "lifecycle", "stop"]
+
+[[actions]]
+id = "relay"
+title = "Open PeerBand Relay"
+command = ["node", "herdr/launch.mjs", "open-pane"]
+
+[[panes]]
+id = "relay"
+title = "PeerBand Relay [Off]"
+description = "Account identity, connection control and metadata activity"
+command = ["node", "herdr/launch.mjs", "pane"]
+placement = "tab"

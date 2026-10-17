@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://peerband.com/schemas/enrollment-redeem.schema.json",
+  "title": "PeerBand enrollment redemption (POST /api/enrollments/redeem)",
+  "description": "Unauthenticated, single-use exchange of a short-lived enrollment grant (created in the PeerBand dashboard) for a long-lived installation credential.",
+  "$defs": {
+    "request": {
+      "type": "object",
+      "required": ["grant", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "grant": { "type": "string", "minLength": 20, "maxLength": 256, "description": "Short-lived single-use enrollment grant." },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120, "description": "Human-readable machine name shown in the dashboard." }
+      }
+    },
+    "response": {
+      "description": "HTTP 200 body.",
+      "type": "object",
+      "required": ["installation_id", "credential"],
+      "properties": {
+        "installation_id": { "type": "string", "minLength": 1, "description": "Machine id assigned by the server." },
+        "credential": { "type": "string", "minLength": 1, "description": "Bearer secret for the relay WebSocket. Shown once; store it privately." },
+        "machine_name": { "type": ["string", "null"] },
+        "account_email": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "errorResponse": {
+      "description": "HTTP 400 (invalid, expired or used grant) or 422 (request validation). `detail` is a string for 400 and a list of validation issues for 422.",
+      "type": "object",
+      "required": ["detail"],
+      "properties": { "detail": { "oneOf": [{ "type": "string" }, { "type": "array" }] } }
+    }
+  },
+  "oneOf": [
+    { "title": "request", "$ref": "#/$defs/request" },
+    { "title": "response", "$ref": "#/$defs/response" },
+    { "title": "errorResponse", "$ref": "#/$defs/errorResponse" }
+  ]
+}

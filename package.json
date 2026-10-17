@@ -1,0 +1,33 @@
+{
+  "name": "peerband",
+  "version": "0.1.0",
+  "description": "PeerBand CLI and Herdr plugin: reach your local coding agents from any MCP client through your PeerBand account",
+  "license": "Apache-2.0",
+  "type": "module",
+  "homepage": "https://peerband.com",
+  "repository": { "type": "git", "url": "git+https://github.com/kshvidler/peerband-cli.git" },
+  "bugs": { "url": "https://github.com/kshvidler/peerband-cli/issues" },
+  "keywords": ["peerband", "herdr", "mcp", "coding-agents", "cli"],
+  "bin": { "peerband": "dist/peerband.mjs" },
+  "engines": { "node": ">=22.13.0" },
+  "files": ["dist/", "herdr/", "herdr-plugin.toml", "protocol/", "install/", "README.md", "LICENSE", "NOTICE", "SECURITY.md"],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "npm run build && vitest run",
+    "check": "npm run typecheck && npm run lint && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/ws": "8.18.2",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "esbuild": "0.28.2",
+    "eslint": "10.12.0",
+    "typescript": "6.0.2",
+    "typescript-eslint": "8.71.0",
+    "vitest": "3.2.7",
+    "ws": "8.22.0"
+  }
+}

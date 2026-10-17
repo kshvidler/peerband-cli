@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://peerband.com/schemas/relay-messages.schema.json",
+  "title": "PeerBand relay WebSocket messages",
+  "description": "Text frames (UTF-8 JSON, at most 65536 bytes) exchanged on wss://<server>/connections after the client authenticates with `Authorization: Bearer <installation credential>`. Discriminator: the `type` field. Binary frames are protocol errors.",
+  "oneOf": [
+    { "$ref": "#/$defs/request" },
+    { "$ref": "#/$defs/ping" },
+    { "$ref": "#/$defs/pong" },
+    { "$ref": "#/$defs/response" }
+  ],
+  "$defs": {
+    "errorBody": {
+      "type": "object",
+      "required": ["code", "message", "next_step"],
+      "additionalProperties": true,
+      "properties": {
+        "code": { "type": "string", "maxLength": 1024 },
+        "message": { "type": "string", "maxLength": 1024 },
+        "next_step": { "type": "string", "maxLength": 1024 }
+      }
+    },
+    "request": {
+      "title": "server -> client: tool request",
+      "description": "At most 32 outstanding per connection; the client answers within 15 seconds. Requests are never replayed.",
+      "type": "object",
+      "required": ["type", "id", "tool", "args", "principal"],
+      "properties": {
+        "type": { "const": "request" },
+        "id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "tool": { "enum": ["list_agents", "get_agent_status", "get_agent_output", "get_request_status", "send_agent_message"] },
+        "args": {
+          "type": "object",
+          "description": "camelCase arguments: list_agents {machine, workspace, status, cursor, limit}; get_agent_status {agentId}; get_agent_output {agentId, lines, bytes, cursor}; send_agent_message {agentId, message, idempotencyKey}; get_request_status {requestId}."
+        },
+        "principal": {
+          "type": "object",
+          "required": ["id", "scopes"],
+          "properties": {
+            "id": { "type": "string" },
+            "scopes": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "ping": {
+      "title": "server -> client: heartbeat",
+      "description": "Sent after 20 seconds of silence. The client must answer with pong; the server closes with code 4000 if no pong arrives for 60 seconds. The client must treat any ping with extra keys as a request-shaped violation (closes 1007).",
+      "type": "object",
+      "required": ["type"],
+      "properties": { "type": { "const": "ping" } },
+      "additionalProperties": false
+    },
+    "pong": {
+      "title": "client -> server: heartbeat reply",
+      "type": "object",
+      "required": ["type"],
+      "properties": { "type": { "const": "pong" } },
+      "additionalProperties": false
+    },
+    "response": {
+      "title": "client -> server: tool response",
+      "description": "Exactly one of `result` or `error`. `id` echoes the request id.",
+      "type": "object",
+      "required": ["type", "id"],
+      "properties": {
+        "type": { "const": "response" },
+        "id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "result": { "type": "object" },
+        "error": { "$ref": "#/$defs/errorBody" }
+      },
+      "oneOf": [{ "required": ["result"], "properties": { "result": { "type": "object" }, "error": false } }, { "required": ["error"], "properties": { "error": { "$ref": "#/$defs/errorBody" }, "result": false } }],
+      "additionalProperties": false
+    }
+  },
+  "$comment": "Close codes: 1000 normal; 1007 invalid JSON/message (client); 1008 policy or duplicate request id (client); 1009 frame too large; 4000 heartbeat timeout; 4001 replaced by a newer connection for the same installation; 4401 authentication failed (also HTTP 401/403 on upgrade). The client treats 4001, 4003, 4401 and HTTP 401/403 as terminal (revoked) and stops reconnecting."
+}

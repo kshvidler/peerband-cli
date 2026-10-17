@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://peerband.com/schemas/device-authorization.schema.json",
+  "title": "PeerBand browser device login (RFC 8628 style)",
+  "description": "`peerband login` requests a short user code, the user approves it in the PeerBand dashboard, and the CLI polls for the installation credential. The two CLI endpoints are unauthenticated. The dashboard approval endpoints use the signed-in account's bearer token and are documented here for completeness; the CLI never calls them.",
+  "$defs": {
+    "userCode": { "type": "string", "pattern": "^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$", "description": "Display form XXXX-XXXX over 20 consonants (RFC 8628 section 6.1)." },
+    "codeRequest": {
+      "description": "POST /api/device/code request body.",
+      "type": "object",
+      "required": ["client", "client_version"],
+      "additionalProperties": false,
+      "properties": {
+        "client": { "const": "peerband-cli" },
+        "client_version": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "machine_name": { "type": "string", "minLength": 1, "maxLength": 120, "description": "Shown to the approver. Defaults on the server to 'PeerBand machine'." },
+        "platform": { "type": "string", "minLength": 1, "maxLength": 40, "description": "process.platform of the CLI." }
+      }
+    },
+    "codeResponse": {
+      "description": "POST /api/device/code HTTP 200 body.",
+      "type": "object",
+      "required": ["device_code", "user_code", "verification_uri", "verification_uri_complete", "expires_in", "interval"],
+      "properties": {
+        "device_code": { "type": "string", "minLength": 20, "maxLength": 256, "description": "Secret polling handle. Never displayed, logged or put in a URL." },
+        "user_code": { "$ref": "#/$defs/userCode" },
+        "verification_uri": { "type": "string", "format": "uri" },
+        "verification_uri_complete": { "type": "string", "format": "uri", "description": "verification_uri plus ?code=<user_code>. This is what the CLI opens." },
+        "expires_in": { "type": "integer", "minimum": 1, "description": "Seconds until the code expires (default 600)." },
+        "interval": { "type": "integer", "minimum": 1, "description": "Minimum seconds between polls (default 5)." }
+      },
+      "additionalProperties": true
+    },
+    "tokenRequest": {
+      "description": "POST /api/device/token request body.",
+      "type": "object",
+      "required": ["device_code"],
+      "additionalProperties": false,
+      "properties": { "device_code": { "type": "string", "minLength": 20, "maxLength": 256 } }
+    },
+    "tokenResponse": {
+      "description": "POST /api/device/token HTTP 200 body once approved. Same shape as the enrollment redemption response; the code is single-use.",
+      "type": "object",
+      "required": ["installation_id", "credential"],
+      "properties": {
+        "installation_id": { "type": "string", "minLength": 1 },
+        "credential": { "type": "string", "minLength": 1, "description": "Bearer secret for the relay WebSocket. Shown once." },
+        "machine_name": { "type": ["string", "null"] },
+        "account_email": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "tokenError": {
+      "description": "POST /api/device/token HTTP 400 body while the request is not (yet) usable.",
+      "type": "object",
+      "required": ["error"],
+      "properties": {
+        "error": {
+          "enum": ["authorization_pending", "slow_down", "access_denied", "expired_token", "invalid_grant"],
+          "description": "authorization_pending: keep polling. slow_down: polled too soon; the interval grows by 5 seconds. access_denied: the user pressed Deny. expired_token: the code expired. invalid_grant: unknown or already used device code."
+        },
+        "error_description": { "type": "string" },
+        "interval": { "type": "integer", "minimum": 1, "description": "New polling interval; present with slow_down." }
+      },
+      "additionalProperties": true
+    },
+    "rateLimited": {
+      "description": "HTTP 429 body (with a Retry-After header).",
+      "type": "object",
+      "required": ["error"],
+      "properties": { "error": { "const": "rate_limited" }, "error_description": { "type": "string" } },
+      "additionalProperties": true
+    },
+    "requestStatus": {
+      "description": "GET /api/device/requests/{user_code} (dashboard, account bearer auth). 404 if unknown or decided by another account.",
+      "type": "object",
+      "required": ["user_code", "status"],
+      "properties": {
+        "user_code": { "$ref": "#/$defs/userCode" },
+        "status": { "enum": ["pending", "approved", "denied", "expired"] },
+        "machine_name": { "type": ["string", "null"] },
+        "platform": { "type": ["string", "null"] },
+        "client": { "type": ["string", "null"] },
+        "client_version": { "type": ["string", "null"] },
+        "requested_at": { "type": "string", "format": "date-time" },
+        "expires_at": { "type": "string", "format": "date-time" },
+        "requester_ip": { "type": ["string", "null"], "description": "Coarse network of the requester (IPv4 /24, IPv6 /48)." }
+      },
+      "additionalProperties": true
+    },
+    "decisionResponse": {
+      "description": "POST /api/device/requests/{user_code}/approve and /deny HTTP 200 body. 409 if the request is no longer pending.",
+      "type": "object",
+      "required": ["status"],
+      "properties": { "status": { "enum": ["approved", "denied"] } },
+      "additionalProperties": true
+    }
+  },
+  "oneOf": [
+    { "title": "codeRequest", "$ref": "#/$defs/codeRequest" },
+    { "title": "codeResponse", "$ref": "#/$defs/codeResponse" },
+    { "title": "tokenRequest", "$ref": "#/$defs/tokenRequest" },
+    { "title": "tokenResponse", "$ref": "#/$defs/tokenResponse" },
+    { "title": "tokenError", "$ref": "#/$defs/tokenError" }
+  ]
+}
