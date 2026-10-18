@@ -90,7 +90,7 @@ if (-not $pbOnPath) {
 Say '  ok peerband installed' Green
 
 Say '==> Logging in' Cyan
-$loginArgs = @('login')
+$loginArgs = @('login', '--herdr-plugin', 'install')
 if ($pbName) { $loginArgs += @('--name', $pbName) }
 try {
     if ($pbGrant) { $env:PEERBAND_GRANT = $pbGrant }
@@ -102,20 +102,14 @@ try {
 }
 if ($loginCode -ne 0) { Fail "peerband login failed. Run 'peerband login' again, or on a headless machine use 'peerband login --grant GRANT' with a grant from your PeerBand dashboard." }
 
-Say '==> Installing the Herdr plugin' Cyan
+# `peerband login --herdr-plugin install` has already added the plugin to Herdr when Herdr is present.
 $pbHasHerdr = [bool](Get-Command herdr -ErrorAction SilentlyContinue)
-if ($pbHasHerdr) {
-    & $pbExe herdr install
-    if ($LASTEXITCODE -ne 0) { Fail 'peerband herdr install failed. Fix the error above and run it again.' }
-} else {
-    Say '  !! Herdr was not found. PeerBand reaches the agents you run in Herdr.' Yellow
-}
 
 Say ''
 if ($pbHasHerdr) {
     Say 'PeerBand is ready. Next:' Green
     Say '  peerband relay    open the PeerBand Relay tab in Herdr'
-    Say '  peerband status   check your connection'
+    Say '  peerband status   check your connection (and the Herdr plugin)'
 } else {
     Say 'PeerBand is installed and logged in. Next:' Green
     Say '  1. Install Herdr 0.9.3 or newer: https://herdr.dev'

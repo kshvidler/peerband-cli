@@ -1,6 +1,6 @@
 id = "peerband"
 name = "PeerBand"
-version = "0.1.0"
+version = "0.1.1"
 min_herdr_version = "0.9.3"
 description = "Reach your Herdr agents from any MCP client through your PeerBand account"
 platforms = ["linux", "macos", "windows"]

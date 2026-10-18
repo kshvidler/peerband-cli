@@ -31,7 +31,7 @@ describe('peerband login', () => {
     expect(result.code).toBe(0);
     expect(seen).toEqual([{ url: 'https://peerband.com/api/enrollments/redeem', body: { grant: 'GRANT-1', name: 'work-box' } }]);
     expect(result.stdout).toContain('Logged in as work-box (me@example.com)');
-    expect(result.stdout).toContain('Next:');
+    expect(result.stdout).toContain('Herdr was not found');
     expect(result.stdout + result.stderr).not.toContain('GRANT-1');
     const saved = await loadCredentials(join(home, 'credentials.json'));
     expect(saved).toMatchObject({ serverUrl: 'https://peerband.com', installationId: 'inst-1', credential: 'secret-credential', machineName: 'work-box', accountEmail: 'me@example.com' });

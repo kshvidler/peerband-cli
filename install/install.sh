@@ -79,14 +79,14 @@ ok "peerband installed"
 step "Logging in"
 if [ -n "$grant" ]; then
   if [ -n "$name" ]; then
-    PEERBAND_GRANT=$grant "$pb" login --name "$name" || die "peerband login failed. Get a fresh grant from your PeerBand dashboard."
+    PEERBAND_GRANT=$grant "$pb" login --herdr-plugin install --name "$name" || die "peerband login failed. Get a fresh grant from your PeerBand dashboard."
   else
-    PEERBAND_GRANT=$grant "$pb" login || die "peerband login failed. Get a fresh grant from your PeerBand dashboard."
+    PEERBAND_GRANT=$grant "$pb" login --herdr-plugin install || die "peerband login failed. Get a fresh grant from your PeerBand dashboard."
   fi
 else
   # Browser sign-in. Under `curl | sh` stdin is the script itself; use the terminal instead.
-  set --
-  [ -z "$name" ] || set -- --name "$name"
+  set -- --herdr-plugin install
+  [ -z "$name" ] || set -- "$@" --name "$name"
   if (exec </dev/tty) 2>/dev/null; then
     "$pb" login "$@" </dev/tty
   else
@@ -95,10 +95,9 @@ else
 fi
 grant=''
 
-step "Installing the Herdr plugin"
+# `peerband login --herdr-plugin install` has already added the plugin to Herdr when Herdr is present.
 if command -v herdr >/dev/null 2>&1; then
-  "$pb" herdr install || die "peerband herdr install failed. Fix the error above and run it again."
-  printf '\n%sPeerBand is ready.%s Next:\n  peerband relay    open the PeerBand Relay tab in Herdr\n  peerband status   check your connection\n' "$G" "$N"
+  printf '\n%sPeerBand is ready.%s Next:\n  peerband relay    open the PeerBand Relay tab in Herdr\n  peerband status   check your connection (and the Herdr plugin)\n' "$G" "$N"
 else
   warn "Herdr was not found. PeerBand reaches the agents you run in Herdr."
   printf '\n%sPeerBand is installed and logged in.%s Next:\n  1. Install Herdr 0.9.3 or newer: https://herdr.dev\n  2. peerband herdr install   then   peerband relay\n  peerband status   check your connection\n' "$G" "$N"

@@ -135,7 +135,7 @@ describe('peerband login (browser device flow)', () => {
     // First wait is the server interval; slow_down raises it and the new interval is honoured.
     expect(r.time.waits).toEqual([5000, 5000, 10000, 10000]);
     expect(r.stdout).toContain('Logged in as laptop (me@example.com)');
-    expect(r.stdout).toContain('Next:');
+    expect(r.stdout).toContain('Herdr was not found');
     const saved = await loadCredentials(r.creds);
     expect(saved).toMatchObject({ serverUrl: mock.url, installationId: 'inst-9', credential: 'cred-SECRET', machineName: 'laptop', accountEmail: 'me@example.com' });
     expect(Date.parse(saved.enrolledAt ?? '')).toBeGreaterThan(Date.now() - 60_000);

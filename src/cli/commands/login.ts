@@ -13,6 +13,7 @@ import { str } from '../args.js';
 import { browserDecision, openBrowser } from '../browser.js';
 import { sanitize, symbols } from '../output.js';
 import { CliError, type CommandSpec, type Ctx, UsageError } from '../types.js';
+import { herdrSetup, HERDR_PLUGIN_MODES, type HerdrPluginMode } from './herdr-setup.js';
 import { credentialsFile } from './shared.js';
 
 export interface GrantLoginOptions {
@@ -151,23 +152,28 @@ function mapFailure(error: unknown, serverUrl: string): Error {
 export const spec: CommandSpec = {
   name: 'login',
   summary: 'Connect this machine to your PeerBand account',
-  usage: 'peerband login [--name NAME] [--no-browser] [--server URL]\n  peerband login --grant GRANT [--name NAME] [--server URL]',
+  usage: 'peerband login [--name NAME] [--no-browser] [--server URL] [--herdr-plugin ask|install|skip]\n  peerband login --grant GRANT [--name NAME] [--server URL]',
   description:
-    'Signs this machine in through your browser. login prints a link and a short code, opens the page (unless you are on SSH, a headless machine or pass --no-browser), and waits while you confirm the code in your PeerBand account. The credential is stored in your PeerBand config directory (readable only by you). Running login again replaces the existing enrollment.\n\nOn a headless machine or in CI, use a one-time grant instead: create it in the PeerBand dashboard and pass --grant GRANT (or set PEERBAND_GRANT).',
+    'Signs this machine in through your browser. login prints a link and a short code, opens the page (unless you are on SSH, a headless machine or pass --no-browser), and waits while you confirm the code in your PeerBand account. The credential is stored in your PeerBand config directory (readable only by you). Running login again replaces the existing enrollment.\n\nOn a headless machine or in CI, use a one-time grant instead: create it in the PeerBand dashboard and pass --grant GRANT (or set PEERBAND_GRANT).\n\nWhen login succeeds it checks for Herdr. If the PeerBand plugin is missing it offers to add it (--herdr-plugin ask, the default; it only asks on a terminal), adds it without asking (install), or just prints the command (skip).',
   options: [
     { name: 'no-browser', type: 'boolean', description: 'Do not open a browser; print the link and code only (SSH, containers).' },
     { name: 'name', type: 'string', valueName: 'NAME', description: "Name shown for this machine in the dashboard. Default: this computer's hostname." },
     { name: 'server', type: 'string', valueName: 'URL', description: 'PeerBand server. Default: $PEERBAND_SERVER or https://peerband.com.' },
     { name: 'grant', type: 'string', valueName: 'GRANT', description: 'Headless/CI: enroll with a dashboard grant instead of the browser. Default: $PEERBAND_GRANT.' },
+    { name: 'herdr-plugin', type: 'string', valueName: 'ask|install|skip', description: 'After login, add the PeerBand plugin to Herdr: ask (default; prompts on a terminal), install, or skip.' },
   ],
   examples: [
     ['peerband login', 'Open your browser, confirm the code, done'],
+    ['peerband login --herdr-plugin install', 'Also add the PeerBand plugin to Herdr without asking (used by the install scripts)'],
     ['peerband login --no-browser', 'Print the link and code; open the link on any other device'],
     ['PEERBAND_GRANT=... peerband login --name work-laptop', 'Headless/CI with a dashboard grant; keeps it out of the process list'],
     ['peerband login --server http://localhost:8000', 'Against a local development server'],
   ],
   notes: ['The code you confirm in the browser must match the one shown here. The secret device code and any grant are never printed or stored. Plain HTTP is only accepted for localhost.'],
   async run(parsed, ctx) {
+    const rawMode = str(parsed, 'herdr-plugin')?.trim().toLowerCase() ?? 'ask';
+    if (!(HERDR_PLUGIN_MODES as readonly string[]).includes(rawMode)) throw new UsageError(`Invalid --herdr-plugin value "${rawMode}".`, 'Use --herdr-plugin ask, install or skip.');
+    const herdrMode = rawMode as HerdrPluginMode;
     const serverUrl = resolveServerUrl(str(parsed, 'server'), ctx.env);
     const name = str(parsed, 'name')?.trim() || hostname();
     // The grant is a secret: never leave it in this process environment or in child environments.
@@ -182,7 +188,7 @@ export const spec: CommandSpec = {
     if (previous) ctx.out.print(s.dim(`Replaced the previous login (${previous.machineName ?? previous.installationId} on ${previous.serverUrl}).`));
     const who = credentials.accountEmail ? ` (${credentials.accountEmail})` : '';
     ctx.out.print(`${s.green(symbols.ok)} Logged in as ${s.bold(credentials.machineName ?? name)}${who}`);
-    ctx.out.print(`${s.dim('Next:')} peerband herdr install  ${s.dim('then')}  peerband relay`);
+    await herdrSetup(ctx, herdrMode);
     return 0;
   },
 };

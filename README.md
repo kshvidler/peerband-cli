@@ -17,6 +17,18 @@ Your MCP client can list agents, read their status and bounded recent output, an
 
 ## Install
 
+Recommended (Node.js 22.13+, Herdr 0.9.3+):
+
+```sh
+npm install -g peerband && peerband login
+```
+
+`peerband login` opens your browser so you can approve this machine, then checks for Herdr and offers to add the PeerBand plugin to it (`Add the PeerBand plugin to Herdr now? [Y/n]`). After that, `peerband relay` opens the PeerBand Relay tab. If Herdr is not installed yet, login tells you how to finish later (install Herdr from https://herdr.dev, then `peerband herdr install` and `peerband relay`). Use `peerband login --herdr-plugin install` to add the plugin without being asked, or `--herdr-plugin skip` to leave Herdr alone.
+
+### One-step install script (alternative)
+
+The script checks Node, runs `npm install -g peerband`, then runs `peerband login --herdr-plugin install`.
+
 macOS and Linux:
 
 ```sh
@@ -29,25 +41,15 @@ Windows PowerShell:
 irm https://peerband.com/install.ps1 | iex
 ```
 
-Or with npm directly:
+### Headless machines and CI
 
-```sh
-npm install -g peerband
-```
-
-The installers check Node, install the CLI, run `peerband login` (which opens your browser), and set up the Herdr plugin when Herdr is present.
-
-Headless machine or CI with no browser? Pass a one-time grant from the PeerBand dashboard instead: `curl -fsSL https://peerband.com/install.sh | sh -s -- --grant GRANT --name "my-server"`, or on Windows `$env:PEERBAND_GRANT = 'GRANT'; irm https://peerband.com/install.ps1 | iex`.
-
-> PeerBand is not published to npm yet. To try a build, run `npm pack` in this repository and install with `PEERBAND_PACKAGE=/path/to/peerband-0.1.0.tgz` (a tarball path or git URL) set when running the installer.
+No browser available? Pass a one-time grant from the PeerBand dashboard instead: `peerband login --grant GRANT` (or set `PEERBAND_GRANT`). With the scripts: `curl -fsSL https://peerband.com/install.sh | sh -s -- --grant GRANT --name "my-server"`, or on Windows `$env:PEERBAND_GRANT = 'GRANT'; irm https://peerband.com/install.ps1 | iex`.
 
 ## Quickstart
 
-1. Install the CLI (above).
-2. `peerband login` opens your browser. Sign in to PeerBand and confirm the code shown in your terminal.
-3. `peerband herdr install` to add the plugin to Herdr.
-4. `peerband relay` to open the PeerBand Relay tab, then press Space to connect.
-5. Add the MCP server URL that `peerband relay` and `peerband status` print (`https://mcp.peerband.com/mcp`) to your MCP client: a custom connector in ChatGPT or Claude, or `claude mcp add --transport http peerband https://mcp.peerband.com/mcp` in Claude Code. Sign in and approve access when the client asks.
+1. `npm install -g peerband && peerband login`. Confirm the code shown in your terminal when your browser opens, and answer Y to adding the Herdr plugin.
+2. `peerband relay` to open the PeerBand Relay tab, then press Space to connect. (If you skipped the plugin: `peerband herdr install` first.)
+3. Add the MCP server URL that `peerband relay` and `peerband status` print (`https://mcp.peerband.com/mcp`) to your MCP client: a custom connector in ChatGPT or Claude, or `claude mcp add --transport http peerband https://mcp.peerband.com/mcp` in Claude Code. Sign in and approve access when the client asks.
 
 ## Logging in
 
@@ -82,7 +84,7 @@ The plugin adds a persistent tab titled `PeerBand Relay [On]` or `[Off]` that sh
 
 | Command | What it does |
 | --- | --- |
-| `peerband login` | Sign in through your browser. Flags: `--no-browser`, `--name NAME`, `--server URL`; headless/CI: `--grant GRANT` |
+| `peerband login` | Sign in through your browser, then offer to add the Herdr plugin. Flags: `--no-browser`, `--name NAME`, `--server URL`, `--herdr-plugin ask\|install\|skip`; headless/CI: `--grant GRANT` |
 | `peerband logout` | Stop a running relay and delete the local credential. Does not revoke it on the server |
 | `peerband status` | Show login, relay and Herdr state. `--json` for machine-readable output |
 | `peerband connect` | Run the connector in the foreground. Flags: `--runtime herdr\|mock`, `--enable-writes`, `--config PATH`, `--server URL` |
