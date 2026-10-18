@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
@@ -120,7 +120,7 @@ function setup(sh: Shell, opts: { herdr?: boolean; shadow?: boolean }) {
   return { bin, home, log, npmPrefix, shadow: opts.shadow ? shadow : undefined };
 }
 
-function run(sh: Shell, flags: Flags, env: Record<string, string> = {}, opts: { herdr?: boolean; shadow?: boolean } = {}) {
+async function run(sh: Shell, flags: Flags, env: Record<string, string> = {}, opts: { herdr?: boolean; shadow?: boolean } = {}) {
   const fx = setup(sh, opts);
   const full: Record<string, string> = {
     PATH: [...(fx.shadow ? [fx.shadow] : []), fx.bin, ...sh.sysPath].join(delimiter),
@@ -137,7 +137,23 @@ function run(sh: Shell, flags: Flags, env: Record<string, string> = {}, opts: { 
     ...env,
   };
   const cmd = sh.kind === "ps" ? ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", sh.script] : [sh.script];
-  const r = spawnSync(sh.exe, [...cmd, ...sh.args(flags)], { env: full, encoding: "utf8", timeout: 60_000 });
+  // Async so the vitest worker stays responsive while slow shells (PowerShell) run.
+  const r = await new Promise<{ status: number | null; stdout: string; stderr: string }>((done, fail) => {
+    const child = spawn(sh.exe, [...cmd, ...sh.args(flags)], { env: full, windowsHide: true });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => (stdout += chunk));
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr += chunk));
+    const timer = setTimeout(() => child.kill(), 60_000);
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      fail(error);
+    });
+    child.on("close", (status) => {
+      clearTimeout(timer);
+      done({ status, stdout, stderr });
+    });
+  });
   const calls = existsSync(fx.log)
     ? readFileSync(fx.log, "utf8")
         .split(/\r?\n/)
@@ -157,40 +173,40 @@ if (shells.length === 0) {
 }
 
 describe.each(shells)("$label", (sh) => {
-  it("prints usage for help", () => {
-    const r = run(sh, { help: true });
+  it("prints usage for help", async () => {
+    const r = await run(sh, { help: true });
     expect(r.status).toBe(0);
     expect(r.out).toMatch(/Usage:/);
     expect(r.out).toMatch(/PEERBAND_PACKAGE/);
     expect(r.calls).toEqual([]);
   });
 
-  it("documents browser login as the default and the grant as headless only", () => {
-    const r = run(sh, { help: true });
+  it("documents browser login as the default and the grant as headless only", async () => {
+    const r = await run(sh, { help: true });
     expect(r.out).toMatch(/opens your browser/);
     expect(r.out).toMatch(/headless[/]CI only/);
     expect(r.out).toMatch(/--?name[\s\S]*--?grant/i);
   });
 
-  it("runs an interactive peerband login with no grant by default", () => {
-    const r = run(sh, { name: "dev-box" });
+  it("runs an interactive peerband login with no grant by default", async () => {
+    const r = await run(sh, { name: "dev-box" });
     expect(r.status).toBe(0);
     const login = r.calls.find((l) => l.startsWith("peerband login"))!;
     expect(argvOf(login)).toBe("peerband login --herdr-plugin install --name dev-box");
     expect(envOf(login)).toBe("PEERBAND_GRANT=");
-    const plain = run(sh, {});
+    const plain = await run(sh, {});
     expect(argvOf(plain.calls.find((l) => l.startsWith("peerband login"))!)).toBe("peerband login --herdr-plugin install");
   });
 
-  it("exits 2 on an unknown argument", () => {
-    const r = run(sh, { bogus: true });
+  it("exits 2 on an unknown argument", async () => {
+    const r = await run(sh, { bogus: true });
     expect(r.status).toBe(2);
     expect(r.out).toMatch(/unknown argument/);
     expect(r.calls).toEqual([]);
   });
 
-  it("rejects an old Node.js before installing anything", () => {
-    const r = run(sh, { grant: GRANT }, { FAKE_NODE_VERSION: "20.0.0" });
+  it("rejects an old Node.js before installing anything", async () => {
+    const r = await run(sh, { grant: GRANT }, { FAKE_NODE_VERSION: "20.0.0" });
     expect(r.status).toBe(1);
     expect(r.out).toMatch(/too old/);
     expect(r.out).toContain("https://nodejs.org/en/download");
@@ -198,30 +214,30 @@ describe.each(shells)("$label", (sh) => {
     expect(r.calls).toEqual([]);
   });
 
-  it("rejects Node 22 older than 22.13", () => {
-    const r = run(sh, {}, { FAKE_NODE_VERSION: "22.12.9" });
+  it("rejects Node 22 older than 22.13", async () => {
+    const r = await run(sh, {}, { FAKE_NODE_VERSION: "22.12.9" });
     expect(r.status).toBe(1);
     expect(r.calls).toEqual([]);
   });
 
-  it("installs peerband@latest by default", () => {
-    const r = run(sh, { grant: GRANT });
+  it("installs peerband@latest by default", async () => {
+    const r = await run(sh, { grant: GRANT });
     expect(r.status).toBe(0);
     expect(argvOf(r.calls[0]!)).toBe("npm install -g peerband@latest");
   });
 
-  it("honours PEERBAND_VERSION", () => {
-    const r = run(sh, { grant: GRANT }, { PEERBAND_VERSION: "1.2.3" });
+  it("honours PEERBAND_VERSION", async () => {
+    const r = await run(sh, { grant: GRANT }, { PEERBAND_VERSION: "1.2.3" });
     expect(argvOf(r.calls[0]!)).toBe("npm install -g peerband@1.2.3");
   });
 
-  it("honours PEERBAND_PACKAGE over the version", () => {
-    const r = run(sh, { grant: GRANT }, { PEERBAND_PACKAGE: "/tmp/peerband-0.1.0.tgz", PEERBAND_VERSION: "9.9.9" });
+  it("honours PEERBAND_PACKAGE over the version", async () => {
+    const r = await run(sh, { grant: GRANT }, { PEERBAND_PACKAGE: "/tmp/peerband-0.1.0.tgz", PEERBAND_VERSION: "9.9.9" });
     expect(argvOf(r.calls[0]!)).toBe("npm install -g /tmp/peerband-0.1.0.tgz");
   });
 
-  it("passes the grant through the environment, never argv or output", () => {
-    const r = run(sh, { grant: GRANT, name: "dev-box" }, {}, { herdr: true });
+  it("passes the grant through the environment, never argv or output", async () => {
+    const r = await run(sh, { grant: GRANT, name: "dev-box" }, {}, { herdr: true });
     expect(r.status).toBe(0);
     const login = r.calls.find((l) => l.startsWith("peerband login"))!;
     expect(argvOf(login)).toBe("peerband login --herdr-plugin install --name dev-box");
@@ -230,22 +246,22 @@ describe.each(shells)("$label", (sh) => {
     expect(r.out).not.toContain(GRANT);
   });
 
-  it("accepts the grant and name from the environment", () => {
-    const r = run(sh, {}, { PEERBAND_GRANT: GRANT, PEERBAND_NAME: "from-env" });
+  it("accepts the grant and name from the environment", async () => {
+    const r = await run(sh, {}, { PEERBAND_GRANT: GRANT, PEERBAND_NAME: "from-env" });
     const login = r.calls.find((l) => l.startsWith("peerband login"))!;
     expect(argvOf(login)).toBe("peerband login --herdr-plugin install --name from-env");
     expect(envOf(login)).toBe(`PEERBAND_GRANT=${GRANT}`);
   });
 
-  it("delegates the Herdr plugin to login (--herdr-plugin install) and prints the right ending", () => {
-    const withHerdr = run(sh, { grant: GRANT }, {}, { herdr: true });
+  it("delegates the Herdr plugin to login (--herdr-plugin install) and prints the right ending", async () => {
+    const withHerdr = await run(sh, { grant: GRANT }, {}, { herdr: true });
     expect(withHerdr.status).toBe(0);
     expect(withHerdr.calls.map(argvOf)).toContain("peerband login --herdr-plugin install");
     expect(withHerdr.calls.map(argvOf)).not.toContain("peerband herdr install");
     expect(withHerdr.out).toMatch(/peerband relay/);
     expect(withHerdr.out).toMatch(/peerband status/);
 
-    const without = run(sh, { grant: GRANT });
+    const without = await run(sh, { grant: GRANT });
     expect(without.status).toBe(0);
     expect(without.calls.map(argvOf)).not.toContain("peerband herdr install");
     expect(without.out).toContain("https://herdr.dev");
@@ -255,23 +271,23 @@ describe.each(shells)("$label", (sh) => {
     expect(without.out).toMatch(/peerband herdr install\s+then\s+peerband relay/);
   });
 
-  it("runs the CLI it installed, not another peerband earlier on PATH", () => {
-    const r = run(sh, { grant: GRANT }, {}, { herdr: true, shadow: true });
+  it("runs the CLI it installed, not another peerband earlier on PATH", async () => {
+    const r = await run(sh, { grant: GRANT }, {}, { herdr: true, shadow: true });
     expect(r.status).toBe(0);
     expect(r.calls.some((l) => l.startsWith("shadow-peerband"))).toBe(false);
     expect(r.calls.map(argvOf)).toContain("peerband login --herdr-plugin install");
     expect(r.out).toMatch(/Another peerband command comes first on your PATH/);
   });
 
-  it("reports an npm failure and stops", () => {
-    const r = run(sh, { grant: GRANT }, { FAKE_NPM_EXIT: "1" });
+  it("reports an npm failure and stops", async () => {
+    const r = await run(sh, { grant: GRANT }, { FAKE_NPM_EXIT: "1" });
     expect(r.status).toBe(1);
     expect(r.out).toMatch(/npm install -g .* failed/);
     expect(r.calls.some((l) => l.startsWith("peerband"))).toBe(false);
   });
 
-  it("reports a login failure without echoing the grant", () => {
-    const r = run(sh, { grant: GRANT }, { FAKE_PEERBAND_EXIT: "1" }, { herdr: true });
+  it("reports a login failure without echoing the grant", async () => {
+    const r = await run(sh, { grant: GRANT }, { FAKE_PEERBAND_EXIT: "1" }, { herdr: true });
     expect(r.status).toBe(1);
     expect(r.out).toMatch(/login failed/);
     expect(r.out).not.toContain(GRANT);

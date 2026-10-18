@@ -45,7 +45,7 @@ Common errors:
 | Code | Meaning | What to do |
 | --- | --- | --- |
 | `insufficient_scope` | The client was not granted `agents:message` | The user must reconnect the MCP client and approve messaging |
-| `writes_disabled` | This machine is read-only (`--read-only`, or `"enableWrites": false` in connector.json) | Tell the user; they can change it on that machine |
+| `write_disabled` | This machine is read-only (`--read-only`, or `"enableWrites": false` in connector.json) | Tell the user; they can change it on that machine |
 | `machine_required` | The account has several machines and no `installation_id` was given | Call `list_machines`, pick the right machine (ask the user if unclear) and pass its `installation_id` |
 | `machine_offline` | The machine is not connected to PeerBand | Ask the user to run `peerband relay` (or `peerband connect`) on it |
 | `runtime_unavailable` | Herdr is not running, or the relay is off | Ask the user to start Herdr and run `peerband relay` |

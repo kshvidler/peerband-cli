@@ -352,7 +352,7 @@ export class ConnectorCore {
 
   private async sendMessage(args: Record<string, unknown>, principal: Principal): Promise<Record<string, unknown>> {
     assertKeys(args, ['agentId', 'message', 'idempotencyKey']);
-    if (!this.writesEnabled) throw new ConnectError('write_disabled', 'Message sending is disabled.', 'Enable writes explicitly in local configuration.');
+    if (!this.writesEnabled) throw new ConnectError('write_disabled', 'Message sending is disabled.', 'This machine is read-only. To allow messages, remove --read-only or set "enableWrites": true in connector.json on that machine.');
     this.requireScope(principal, 'agents:message');
     const key = args.idempotencyKey;
     const message = args.message;
