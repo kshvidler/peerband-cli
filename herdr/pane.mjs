@@ -4,10 +4,10 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stdout } from "node:process";
-import { renderPane, startPaneInput } from "./pane-ui.mjs";
+import { renderPane, startPaneInput, controlBoxRows } from "./pane-ui.mjs";
 import { connectControl } from "./control.mjs";
 import { syncRelayTab, closeRelayTab } from "./relay-tab.mjs";
-import { credentialsPath } from "./paths.mjs";
+import { credentialsPath, connectorConfigPath } from "./paths.mjs";
 
 const exec = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url));
@@ -18,7 +18,11 @@ const identity = typeof credentials.machineName === "string" && credentials.mach
   : typeof credentials.installationId === "string" && credentials.installationId
     ? `Installation ${credentials.installationId}`
     : "Not logged in (run `peerband login`)";
-const email = typeof credentials.accountEmail === "string" && credentials.accountEmail ? credentials.accountEmail : "Unavailable";
+// No email (the server did not return one) is not an error: the Account row is simply not shown.
+const email = typeof credentials.accountEmail === "string" && credentials.accountEmail ? credentials.accountEmail : "";
+// Messages to agents are allowed unless connector.json says "enableWrites": false (same rule as `peerband connect`).
+const connectorConfig = await readFile(connectorConfigPath(), "utf8").then(JSON.parse).catch(() => ({}));
+const messages = connectorConfig && connectorConfig.enableWrites === false ? "read-only" : "allowed";
 
 let closing = false;
 let pending = false;
@@ -37,7 +41,7 @@ let controlClosed;
 const closed = new Promise((resolve) => { controlClosed = resolve; });
 function draw() {
   if (closing || !stdout.isTTY) return;
-  stdout.write("\x1b[2J\x1b[H" + renderPane({ snapshot, identity, email, error: errorText, columns: stdout.columns, rows: stdout.rows }));
+  stdout.write("\x1b[2J\x1b[H" + renderPane({ snapshot, identity, email, messages, error: errorText, columns: stdout.columns, rows: stdout.rows }));
 }
 async function runLifecycle(command) {
   const { stdout: result } = await exec(process.execPath, [lifecycle, command], { timeout: 5000, windowsHide: true, maxBuffer: 65_536 });
@@ -103,7 +107,7 @@ async function close() {
 }
 const onInputEnd = () => { void close(); };
 const onSignal = () => { void close(); };
-const stopInput = startPaneInput({ onToggle: toggle, onClose: () => {
+const stopInput = startPaneInput({ boxRows: controlBoxRows(email), onToggle: toggle, onClose: () => {
   if (closeArmed) { void close(); return; }
   closeArmed = true;
   errorText = "Closing disconnects the relay. Press q again to close; reopen with `peerband relay`.";
@@ -117,7 +121,7 @@ if (stdinIsInteractive()) {
   process.once("SIGHUP", onSignal);
 }
 if (!stdinIsInteractive()) {
-  console.log(renderPane({ snapshot, identity, email, error: "Interactive terminal controls are required in this pane." }));
+  console.log(renderPane({ snapshot, identity, email, messages, error: "Interactive terminal controls are required in this pane." }));
 } else {
   try {
     try { control = await connectControl(); }

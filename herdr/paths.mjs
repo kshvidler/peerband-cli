@@ -1,7 +1,7 @@
 // Plain-JS twin of configHome() in src/core/config.ts. Keep the semantics identical.
 import { createHash } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
-import { join, posix, win32 } from "node:path";
+import { join, posix, resolve, win32 } from "node:path";
 
 export function configHome(env = process.env, platform = process.platform, home = homedir()) {
   if (env.PEERBAND_CONFIG_HOME) return env.PEERBAND_CONFIG_HOME;
@@ -9,6 +9,8 @@ export function configHome(env = process.env, platform = process.platform, home 
   return join(env.XDG_CONFIG_HOME || join(home, ".config"), "peerband");
 }
 
+// PEERBAND_CONNECTOR_CONFIG overrides the default file, as in `peerband connect`.
+export const connectorConfigPath = (config = configHome(), env = process.env) => env.PEERBAND_CONNECTOR_CONFIG ? resolve(env.PEERBAND_CONNECTOR_CONFIG) : join(config, "connector.json");
 export const credentialsPath = (config = configHome()) => join(config, "credentials.json");
 export const lockPath = (config = configHome()) => join(config, "relay-helper.lock");
 export const ownerRecordPath = (config = configHome()) => join(lockPath(config), "owner.json");

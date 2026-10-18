@@ -22,6 +22,7 @@ export interface PaneSnapshot {
 }
 
 export const openRelayTab = relayTabModule.openRelayTab as (options?: Record<string, unknown>) => Promise<string>;
+export const canonicalConfig = pathsModule.canonicalConfig as (config: string, platform?: NodeJS.Platform) => string;
 export const controlChannel = pathsModule.controlChannel as (config?: string, platform?: NodeJS.Platform) => string;
 export const ownerRecordPath = pathsModule.ownerRecordPath as (config?: string) => string;
 export const fallbackPaneSnapshot = paneStateModule.fallbackPaneSnapshot as (value: unknown) => PaneSnapshot;

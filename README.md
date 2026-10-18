@@ -7,7 +7,7 @@ MCP client --> PeerBand relay <== outbound WebSocket == peerband connector --> H
  (Claude, ...)  (peerband.com)                          (on your machine)     (your agents)
 ```
 
-Your MCP client can list agents, read their status and bounded recent output, and (only if you opt in) send them a message. This project is unofficial and is not affiliated with Herdr or Amazon.
+Your MCP client can list agents, read their status and bounded recent output, and send them a message (sending needs your approval of the `agents:message` permission when you connect the client, and a machine can opt out; see [Security model](#security-model)). This project is unofficial and is not affiliated with Herdr or Amazon.
 
 ## Requirements
 
@@ -74,7 +74,7 @@ Opened your browser.
 
 ## The Relay tab
 
-The plugin adds a persistent tab titled `PeerBand Relay [On]` or `[Off]` that shows your account, connection state and a metadata-only activity log.
+The plugin adds a persistent tab titled `PeerBand Relay [On]` or `[Off]` that shows your machine, account (when the server returned an email), whether messages are allowed, the connection state and a metadata-only activity log.
 
 - **Space** or **Enter** (or a click on the control box) toggles the connection.
 - **Q**, **Esc** or **Ctrl+C** asks to close the tab; press it again to confirm. Closing it disconnects the relay.
@@ -86,9 +86,9 @@ The plugin adds a persistent tab titled `PeerBand Relay [On]` or `[Off]` that sh
 | --- | --- |
 | `peerband login` | Sign in through your browser, then offer to add the Herdr plugin. Flags: `--no-browser`, `--name NAME`, `--server URL`, `--herdr-plugin ask\|install\|skip`; headless/CI: `--grant GRANT` |
 | `peerband logout` | Stop a running relay and delete the local credential. Does not revoke it on the server |
-| `peerband status` | Show login, relay and Herdr state. `--json` for machine-readable output |
-| `peerband connect` | Run the connector in the foreground. Flags: `--runtime herdr\|mock`, `--enable-writes`, `--config PATH`, `--server URL` |
-| `peerband relay` | Open or focus the Relay tab in Herdr |
+| `peerband status` | Show login, relay, messaging and Herdr state, including whether the Herdr plugin is the right one. `--json` for machine-readable output |
+| `peerband connect` | Run the connector in the foreground. Flags: `--runtime herdr\|mock`, `--read-only`, `--config PATH`, `--server URL` (`--enable-writes` is still accepted but redundant) |
+| `peerband relay` | Open or focus the Relay tab in Herdr. If the plugin is missing the wrong version, a local checkout, or points at another config directory, it offers to repair it first |
 | `peerband herdr install` | Install (or update) the Herdr plugin |
 | `peerband herdr uninstall` | Stop the relay, remove the plugin and its `settings.json` |
 | `peerband --version`, `help [command]` | Version and help |
@@ -119,13 +119,23 @@ Optional `connector.json`:
 }
 ```
 
-All fields are optional. `allowedAgents` and `allowedWorkspaces` restrict what MCP clients can see; `stateDirectory` moves the receipt store (default `state/` in the config home). The `herdr` block is only needed when Herdr is not on `PATH` or you target a specific session.
+All fields are optional. `enableWrites` defaults to `true`; set it to `false` to make this machine read-only (the same as `peerband connect --read-only`; it also applies to the Relay tab). `allowedAgents` and `allowedWorkspaces` restrict what MCP clients can see; `stateDirectory` moves the receipt store (default `state/` in the config home). The `herdr` block is only needed when Herdr is not on `PATH` or you target a specific session.
+
+## Agent skill
+
+Give your coding agents (Claude Code, Codex, Cursor, ...) a skill that explains the PeerBand MCP tools and how to use them safely:
+
+```sh
+npx skills add kshvidler/peerband-cli
+```
+
+It installs `skills/peerband/SKILL.md` from this repository with the [`skills`](https://github.com/vercel-labs/skills) tool. `peerband login` and `peerband relay` print this command after a successful setup. The skill is not part of the npm package.
 
 ## Security model
 
 - **Outbound only.** The connector dials the relay over a WebSocket; it opens no listening port.
 - **Credential on disk** is stored in `credentials.json`, readable only by your user (mode 0600 inside a 0700 directory).
-- **Read-only by default.** Listing agents, status and bounded, sanitized output are available. Sending messages requires `--enable-writes` or `"enableWrites": true`, and each send needs an idempotency key.
+- **Messaging is on by default, gated by consent.** An MCP client can call `send_agent_message` only if you approved the `agents:message` scope when you connected it (reading needs only the read scope). Each send needs an idempotency key. A machine can opt out entirely with `peerband connect --read-only` or `"enableWrites": false` in `connector.json`; `peerband status` and the Relay tab show which mode it is in.
 - **Metadata-only activity.** The Relay tab and receipts record what happened (tool, target, outcome), not prompts or output.
 - **Logout does not revoke.** `peerband logout` only deletes the local file. To revoke a machine, remove it in the PeerBand dashboard.
 

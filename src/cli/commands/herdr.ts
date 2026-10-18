@@ -7,7 +7,7 @@ import { NOT_FOUND_HINT, NOT_FOUND_MESSAGE, failureDetail } from '../herdr-bin.j
 import { symbols } from '../output.js';
 import { CliError, type CommandSpec, type Ctx, type HerdrResult } from '../types.js';
 import { credentialsFile } from './shared.js';
-import { pluginInstalled } from './status.js';
+import { pluginInstalled } from './herdr-check.js';
 
 export const DEFAULT_SOURCE = 'kshvidler/peerband-cli';
 const PLUGIN_ID = 'peerband';

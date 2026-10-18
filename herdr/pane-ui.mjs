@@ -8,7 +8,17 @@ const timeLabel = (value) => {
 };
 const safeText = (value, maximum = 160) => String(value ?? "").replace(/\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\)?)/g, "").replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").slice(0, maximum);
 
-export function renderPane({ snapshot, identity, email, error, columns = Infinity, rows: height = Infinity }) {
+// "Messages" is the connector's write state: allowed by default, read-only when connector.json says "enableWrites": false.
+export const messagesLine = (messages) => messages === "read-only"
+  ? "Messages  read-only"
+  : messages === "allowed"
+    ? 'Messages  allowed (turn off: "enableWrites": false in connector.json)'
+    : "";
+
+// 1-based screen rows of the on/off box; the Account row is only shown when the server returned an email.
+export const controlBoxRows = (email) => (email ? [7, 9] : [6, 8]);
+
+export function renderPane({ snapshot, identity, email, messages, error, columns = Infinity, rows: height = Infinity }) {
   const label = paneLabel(snapshot);
   const enabled = snapshot?.state === "running";
   const width = Number.isFinite(columns) ? Math.max(1, Math.floor(columns)) : Infinity;
@@ -17,10 +27,11 @@ export function renderPane({ snapshot, identity, email, error, columns = Infinit
   if (heightLimit < 13) {
     const compactRows = [
       `RELAY ${enabled ? "ON" : "OFF"} · ${safeText(label, 20)}`,
-      `Account ${safeText(email || "Unavailable")}`,
+      email ? `Account ${safeText(email)}` : `Machine ${safeText(identity || "Unavailable")}`,
       "Space / Enter  toggle",
       "q / Esc  close relay",
       "Close disconnects; reopen: peerband relay",
+      ...(messages ? [`Messages ${messages === "read-only" ? "read-only" : "allowed"}`] : []),
     ];
     return compactRows.slice(0, heightLimit).map(clipLine).join("\n");
   }
@@ -31,7 +42,7 @@ export function renderPane({ snapshot, identity, email, error, columns = Infinit
     "PeerBand · Herdr control",
     "─".repeat(Number.isFinite(width) ? Math.max(0, Math.min(40, width)) : 40),
     `Machine   ${safeText(identity || "Unavailable")}`,
-    `Account   ${safeText(email || "Unavailable")}`,
+    ...(email ? [`Account   ${safeText(email)}`] : []),
     "",
     `┌${"─".repeat(innerWidth)}┐`,
     boxLine(`  RELAY   ${enabled ? "● ON " : "○ OFF"}   ${safeText(label, 20)}`),
@@ -39,7 +50,7 @@ export function renderPane({ snapshot, identity, email, error, columns = Infinit
       ? `  [Space/Enter] ${enabled ? "Off" : "On"}`
       : `  [Space / Enter]  ${enabled ? "Turn off" : "Turn on"}`),
     `└${"─".repeat(innerWidth)}┘`,
-    "",
+    safeText(messagesLine(messages)),
     "Recent activity  ·  metadata only",
   ];
   const activities = (snapshot?.activity ?? []).slice(-8).reverse().map((item) =>
@@ -60,7 +71,7 @@ export function renderPane({ snapshot, identity, email, error, columns = Infinit
   return body.map(clipLine).join("\n");
 }
 
-export function startPaneInput({ onToggle, onClose, input = stdin, output = stdout }) {
+export function startPaneInput({ onToggle, onClose, input = stdin, output = stdout, boxRows = [7, 9] }) {
   if (!input.isTTY || !input.setRawMode) return () => {};
   const wasRaw = input.isRaw;
   const mouseEnabled = !Number.isFinite(output.rows) || output.rows >= 13;
@@ -79,7 +90,7 @@ export function startPaneInput({ onToggle, onClose, input = stdin, output = stdo
     const row = Number(match?.[2]);
     const boxWidth = Number.isFinite(output.columns) ? Math.max(1, Math.min(42, Math.floor(output.columns))) : 42;
     const hasControlBox = !Number.isFinite(output.rows) || output.rows >= 13;
-    if (mouseEnabled && hasControlBox && match && row >= 7 && row <= 9 && column >= 1 && column <= boxWidth) onToggle();
+    if (mouseEnabled && hasControlBox && match && row >= boxRows[0] && row <= boxRows[1] && column >= 1 && column <= boxWidth) onToggle();
     if (mouseBuffer.includes("M")) mouseBuffer = "";
   };
   input.on("keypress", keypress);

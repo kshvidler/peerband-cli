@@ -14,7 +14,7 @@ import { browserDecision, openBrowser } from '../browser.js';
 import { sanitize, symbols } from '../output.js';
 import { CliError, type CommandSpec, type Ctx, UsageError } from '../types.js';
 import { herdrSetup, HERDR_PLUGIN_MODES, type HerdrPluginMode } from './herdr-setup.js';
-import { credentialsFile } from './shared.js';
+import { credentialsFile, printSkillTip } from './shared.js';
 
 export interface GrantLoginOptions {
   serverUrl: string;
@@ -154,7 +154,7 @@ export const spec: CommandSpec = {
   summary: 'Connect this machine to your PeerBand account',
   usage: 'peerband login [--name NAME] [--no-browser] [--server URL] [--herdr-plugin ask|install|skip]\n  peerband login --grant GRANT [--name NAME] [--server URL]',
   description:
-    'Signs this machine in through your browser. login prints a link and a short code, opens the page (unless you are on SSH, a headless machine or pass --no-browser), and waits while you confirm the code in your PeerBand account. The credential is stored in your PeerBand config directory (readable only by you). Running login again replaces the existing enrollment.\n\nOn a headless machine or in CI, use a one-time grant instead: create it in the PeerBand dashboard and pass --grant GRANT (or set PEERBAND_GRANT).\n\nWhen login succeeds it checks for Herdr. If the PeerBand plugin is missing it offers to add it (--herdr-plugin ask, the default; it only asks on a terminal), adds it without asking (install), or just prints the command (skip).',
+    'Signs this machine in through your browser. login prints a link and a short code, opens the page (unless you are on SSH, a headless machine or pass --no-browser), and waits while you confirm the code in your PeerBand account. The credential is stored in your PeerBand config directory (readable only by you). Running login again replaces the existing enrollment.\n\nOn a headless machine or in CI, use a one-time grant instead: create it in the PeerBand dashboard and pass --grant GRANT (or set PEERBAND_GRANT).\n\nWhen login succeeds it checks for Herdr. If the PeerBand plugin is missing, or installed but wrong (another version, a local checkout, a stale config directory), it offers to add or repair it (--herdr-plugin ask, the default; it only asks on a terminal), adds it without asking (install), or just prints the command (skip).',
   options: [
     { name: 'no-browser', type: 'boolean', description: 'Do not open a browser; print the link and code only (SSH, containers).' },
     { name: 'name', type: 'string', valueName: 'NAME', description: "Name shown for this machine in the dashboard. Default: this computer's hostname." },
@@ -189,6 +189,8 @@ export const spec: CommandSpec = {
     const who = credentials.accountEmail ? ` (${credentials.accountEmail})` : '';
     ctx.out.print(`${s.green(symbols.ok)} Logged in as ${s.bold(credentials.machineName ?? name)}${who}`);
     await herdrSetup(ctx, herdrMode);
+    ctx.out.print('');
+    printSkillTip(ctx);
     return 0;
   },
 };

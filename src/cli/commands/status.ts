@@ -1,11 +1,13 @@
 import { configHome, loadCredentials, mcpUrlFor, type Credentials } from '../../core/index.js';
+import { checkHerdrPlugin, REPAIR_COMMAND, type PluginProblem } from './herdr-check.js';
 import { paneLabel } from '../herdr-js.js';
 import { flag } from '../args.js';
 import { relaySnapshot, type RelaySnapshot } from '../control.js';
-import { failureDetail } from '../herdr-bin.js';
 import { symbols, type Style } from '../output.js';
 import { EXIT_NOT_LOGGED_IN, type CommandSpec, type Ctx } from '../types.js';
-import { credentialsFile } from './shared.js';
+import { credentialsFile, loadMachineConnectorConfig, writesEnabled } from './shared.js';
+
+export { pluginInstalled } from './herdr-check.js';
 
 export interface StatusReport {
   version: string;
@@ -19,19 +21,15 @@ export interface StatusReport {
   installationId: string | null;
   enrolledAt: string | null;
   relay: { running: boolean; connection: string | null; source: 'control' | 'file' | 'none' };
-  herdr: { found: boolean; version: string | null; pluginInstalled: boolean | null };
-}
-
-export async function pluginInstalled(ctx: Ctx): Promise<{ found: boolean; installed: boolean; detail?: string }> {
-  const result = await ctx.runHerdr(['plugin', 'list'], { timeoutMs: 10_000 });
-  if (result.notFound) return { found: false, installed: false };
-  if (result.code !== 0) return { found: true, installed: false, detail: failureDetail(result) };
-  // `herdr plugin list` prints one `- <id> (<name>) <state> [<source>]` line per plugin.
-  return { found: true, installed: /^\s*-\s+peerband\s/m.test(result.stdout) };
-}
-
-function herdrVersion(output: string): string | null {
-  return /\d+\.\d+\.\d+(?:[-+.\w]*)?/.exec(output)?.[0] ?? null;
+  /** Whether MCP clients may send messages to agents from this machine; null if connector.json is unreadable. */
+  messages: 'allowed' | 'read-only' | null;
+  herdr: {
+    found: boolean;
+    version: string | null;
+    pluginInstalled: boolean | null;
+    pluginSource: string | null;
+    pluginProblems: PluginProblem[];
+  };
 }
 
 function safeMcpUrl(serverUrl: string, env: NodeJS.ProcessEnv): string | null {
@@ -50,9 +48,11 @@ export async function buildStatus(ctx: Ctx): Promise<StatusReport> {
     credentials = undefined;
   }
   const snapshot: RelaySnapshot | undefined = await relaySnapshot(ctx.env);
-  const version = await ctx.runHerdr(['--version'], { timeoutMs: 10_000 });
-  const plugin = version.notFound ? { found: false, installed: false } : await pluginInstalled(ctx);
-  const herdrFound = !version.notFound;
+  const plugin = await checkHerdrPlugin(ctx);
+  const messages = await loadMachineConnectorConfig(ctx).then(
+    (config) => (writesEnabled(config) ? ('allowed' as const) : ('read-only' as const)),
+    () => null,
+  );
   return {
     version: ctx.version,
     node: process.versions.node,
@@ -69,10 +69,13 @@ export async function buildStatus(ctx: Ctx): Promise<StatusReport> {
       connection: snapshot?.connectionState ?? null,
       source: snapshot?.source ?? 'none',
     },
+    messages,
     herdr: {
-      found: herdrFound,
-      version: herdrFound && version.code === 0 ? herdrVersion(`${version.stdout} ${version.stderr}`) : null,
-      pluginInstalled: herdrFound ? plugin.installed : null,
+      found: plugin.found,
+      version: plugin.herdrVersion,
+      pluginInstalled: plugin.found ? plugin.installed : null,
+      pluginSource: plugin.source,
+      pluginProblems: plugin.problems,
     },
   };
 }
@@ -108,6 +111,14 @@ function renderHuman(report: StatusReport, ctx: Ctx): void {
       ? `${colorConnection(s, report.relay.connection)} ${s.dim('(last known; relay not running)')}`
       : s.dim(`${symbols.ring} not running ${s.dim('(open it with `peerband relay`)')}`);
   rows.push(['Relay', relayLine]);
+  if (report.messages) {
+    rows.push([
+      'Messages',
+      report.messages === 'allowed'
+        ? `allowed ${s.dim('(needs the agents:message consent; turn off with --read-only or "enableWrites": false in connector.json)')}`
+        : 'read-only',
+    ]);
+  }
   rows.push([
     'Herdr',
     !report.herdr.found
@@ -115,11 +126,14 @@ function renderHuman(report: StatusReport, ctx: Ctx): void {
       : `${report.herdr.version ?? 'unknown version'}`,
   ]);
   if (report.herdr.found) {
+    const first = report.herdr.pluginProblems[0];
     rows.push([
       'Plugin',
-      report.herdr.pluginInstalled
-        ? `${s.green(symbols.ok)} installed`
-        : `${s.yellow(symbols.warn)} not installed ${s.dim('(run `peerband herdr install`)')}`,
+      !report.herdr.pluginInstalled
+        ? `${s.yellow(symbols.warn)} not installed ${s.dim(`(run \`${REPAIR_COMMAND}\`)`)}`
+        : first
+          ? `${s.yellow(symbols.warn)} ${first.message} ${s.dim(`(run \`${REPAIR_COMMAND}\`)`)}`
+          : `${s.green(symbols.ok)} ${report.herdr.pluginSource ?? 'installed'}`,
     ]);
   }
   rows.push(['peerband', `${report.version} ${s.dim(`(node ${report.node})`)}`]);

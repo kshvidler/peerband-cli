@@ -2,18 +2,20 @@ import { openRelayTab } from '../herdr-js.js';
 import { NOT_FOUND_HINT } from '../herdr-bin.js';
 import { sanitize, symbols } from '../output.js';
 import { CliError, type CommandSpec } from '../types.js';
-import { printMcpHint, requireCredentials } from './shared.js';
+import { ensureHerdrPlugin } from './herdr-setup.js';
+import { printMcpHint, printSkillTip, requireCredentials } from './shared.js';
 
 export const spec: CommandSpec = {
   name: 'relay',
   summary: 'Open or focus the PeerBand Relay tab in Herdr',
   usage: 'peerband relay',
   description:
-    'Opens the PeerBand Relay in a persistent Herdr tab, or focuses it if it is already open. The tab shows your account, connection state and metadata-only activity; closing it disconnects. Requires Herdr and the PeerBand plugin (`peerband herdr install`).',
+    'Opens the PeerBand Relay in a persistent Herdr tab, or focuses it if it is already open. The tab shows your account, connection state and metadata-only activity; closing it disconnects. Requires Herdr and the PeerBand plugin (`peerband herdr install`). If the plugin is wrong (another version, a local checkout, or a stale config directory), relay offers to repair it first.',
   options: [],
   examples: [['peerband relay', 'Open the relay tab']],
   async run(_parsed, ctx) {
     const credentials = await requireCredentials(ctx);
+    await ensureHerdrPlugin(ctx);
     try {
       await (ctx.openRelayTab ?? openRelayTab)();
     } catch (error) {
@@ -27,6 +29,7 @@ export const spec: CommandSpec = {
     const s = ctx.out.stdout;
     ctx.out.print(`${s.green(symbols.ok)} PeerBand Relay is open in Herdr.`);
     printMcpHint(ctx, credentials.serverUrl);
+    printSkillTip(ctx);
     return 0;
   },
 };

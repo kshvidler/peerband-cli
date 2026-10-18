@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 // @ts-expect-error -- plain JS plugin module without type declarations
 import { normalizePaneEvent, createPaneSnapshot, fallbackPaneSnapshot, paneLabel } from "../herdr/pane-state.mjs";
 // @ts-expect-error -- plain JS plugin module without type declarations
-import { renderPane, startPaneInput } from "../herdr/pane-ui.mjs";
+import { controlBoxRows, renderPane, startPaneInput } from "../herdr/pane-ui.mjs";
 
 it("keeps only bounded allowlisted activity metadata", () => {
   const event = normalizePaneEvent({
@@ -57,6 +57,46 @@ it("renders identity and metadata activity without message or output previews", 
   expect(hostile).not.toContain("\u009c");
   expect(hostile).not.toContain("\u001b");
   expect(hostile).toContain("bad error");
+});
+
+it("shows the Messages state, allowed by default and read-only on request", () => {
+  const snapshot = { state: "running", connectionState: "connected", activity: [] };
+  const allowed = renderPane({ snapshot, identity: "m", email: "a@b.c", messages: "allowed" });
+  expect(allowed).toContain('Messages  allowed (turn off: "enableWrites": false in connector.json)');
+  const readOnly = renderPane({ snapshot, identity: "m", email: "a@b.c", messages: "read-only" });
+  expect(readOnly).toContain("Messages  read-only");
+  expect(readOnly).not.toContain("turn off");
+  // Compact layouts keep a short version after the controls.
+  expect(renderPane({ snapshot, identity: "m", email: "a@b.c", messages: "read-only", columns: 40, rows: 6 })).toContain("Messages read-only");
+});
+
+it("hides the Account row (instead of showing Unavailable) when there is no email", () => {
+  const snapshot = { state: "running", connectionState: "connected", activity: [] };
+  const view = renderPane({ snapshot, identity: "Build machine", email: "", messages: "allowed", columns: 60, rows: 22 });
+  expect(view).toContain("Machine   Build machine");
+  expect(view).not.toContain("Account");
+  expect(view).not.toContain("Unavailable");
+  const lines = view.split("\n");
+  expect(lines.length).toBeLessThanOrEqual(22);
+  expect(lines[5]).toContain("RELAY");
+  expect(lines[6]).toContain("Space");
+  const compact = renderPane({ snapshot, identity: "Build machine", email: undefined, columns: 40, rows: 6 });
+  expect(compact).not.toContain("Unavailable");
+  expect(compact).toContain("Machine Build machine");
+  // The click target follows the layout.
+  expect(controlBoxRows("a@b.c")).toEqual([7, 9]);
+  expect(controlBoxRows("")).toEqual([6, 8]);
+  const input = new EventEmitter() as EventEmitter & { isTTY: boolean; isRaw: boolean; setRawMode(value: boolean): void; pause(): EventEmitter };
+  input.isTTY = true;
+  input.isRaw = false;
+  input.setRawMode = () => {};
+  input.pause = () => input;
+  let toggles = 0;
+  const cleanup = startPaneInput({ onToggle: () => { toggles++; }, onClose: () => {}, input, output: { columns: 40, rows: 20, write: () => true } as never, boxRows: controlBoxRows("") });
+  input.emit("data", Buffer.from("\x1b[<0;12;6M"));
+  input.emit("data", Buffer.from("\x1b[<0;12;9M"));
+  expect(toggles).toBe(1);
+  cleanup();
 });
 
 it("fits the pane to a compact viewport while keeping controls, identity, and footer visible", () => {

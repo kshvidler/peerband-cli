@@ -114,6 +114,45 @@ describe('peerband connect --managed', () => {
   });
 });
 
+describe('peerband connect: messaging default', () => {
+  /** Runs the foreground connector against a relay that rejects immediately, and returns the banner. */
+  async function banner(args: string[], config?: string): Promise<string> {
+    const relay = await startMockRelay((ws) => ws.close(4001, 'revoked'));
+    const home = await loggedIn(relay.url);
+    if (config !== undefined) await writeFile(join(home, 'connector.json'), config);
+    const child = spawn(process.execPath, [DIST, 'connect', '--runtime', 'mock', ...args], { env: childEnv(home), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    let stderr = '';
+    child.stderr.on('data', (chunk) => (stderr += chunk));
+    await new Promise((resolve) => child.once('close', resolve));
+    return stderr;
+  }
+
+  it('allows messages by default', async () => {
+    expect(await banner([])).toContain('mock runtime, messages allowed.');
+  });
+
+  it('is read-only with --read-only', async () => {
+    expect(await banner(['--read-only'])).toContain('mock runtime, read-only.');
+  });
+
+  it('is read-only with "enableWrites": false in connector.json', async () => {
+    expect(await banner([], '{"enableWrites": false}')).toContain('mock runtime, read-only.');
+    expect(await banner([], '{"enableWrites": true}')).toContain('messages allowed');
+  });
+
+  it('still accepts the redundant --enable-writes, and rejects it together with --read-only', async () => {
+    expect(await banner(['--enable-writes'])).toContain('messages allowed');
+    const home = await tempDir();
+    await saveCredentials({ serverUrl: 'http://127.0.0.1:1', installationId: 'i', credential: 'c' }, join(home, 'credentials.json'));
+    const both = await runCli(['connect', '--runtime', 'mock', '--read-only', '--enable-writes'], { env: { PEERBAND_CONFIG_HOME: home } });
+    expect(both.code).toBe(2);
+    expect(both.stderr).toContain('contradict');
+    const help = await runCli(['help', 'connect']);
+    expect(help.stdout).toContain('--read-only');
+    expect(help.stdout).toContain('Redundant');
+  });
+});
+
 describe('peerband connect (foreground)', () => {
   it('prints connection and metadata-only activity lines, and fails clearly when revoked', async () => {
     const relay = await startMockRelay(relayScript((ws) => setTimeout(() => ws.close(4001, 'revoked'), 20)));
@@ -125,7 +164,7 @@ describe('peerband connect (foreground)', () => {
     expect(code).toBe(1);
     expect(stderr).toContain(`Connected to ${relay.url} as test-box`);
     expect(stderr).toMatch(/\d\d:\d\d:\d\d\s+list_agents\s+-\s+success\s+\d+ ms/);
-    expect(stderr).toContain('read-only');
+    expect(stderr).toContain('messages allowed');
     expect(stderr).toContain('rejected');
     expect(stderr).toContain('peerband login');
     expect(stderr).not.toContain('\u001b[');

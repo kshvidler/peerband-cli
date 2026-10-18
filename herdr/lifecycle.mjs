@@ -66,7 +66,7 @@ let paneStateWrites = Promise.resolve();
 
 async function supervise() {
   const token = randomBytes(32).toString("hex");
-  // Write permission (enableWrites) is read from connector.json by the connector itself.
+  // Messaging is on by default; "enableWrites": false in connector.json (read by the connector itself) turns it off.
   const childArgs = [connectorEntry, "connect", "--managed"];
   if (process.env.PEERBAND_RUNTIME === "mock")
     childArgs.push("--runtime", "mock");

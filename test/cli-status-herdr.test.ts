@@ -28,10 +28,11 @@ describe('peerband status', () => {
       server: null,
       mcpUrl: null,
       relay: { running: false, connection: null, source: 'none' },
-      herdr: { found: false, version: null, pluginInstalled: null },
+      messages: 'allowed',
+      herdr: { found: false, version: null, pluginInstalled: null, pluginSource: null, pluginProblems: [] },
       configHome: home,
     });
-    expect(Object.keys(report).sort()).toEqual(['configHome', 'email', 'enrolledAt', 'herdr', 'installationId', 'loggedIn', 'machine', 'mcpUrl', 'node', 'relay', 'server', 'version']);
+    expect(Object.keys(report).sort()).toEqual(['configHome', 'email', 'enrolledAt', 'herdr', 'installationId', 'loggedIn', 'machine', 'mcpUrl', 'messages', 'node', 'relay', 'server', 'version']);
   });
 
   it('--json with credentials exposes identity but never the secret', async () => {
@@ -49,6 +50,21 @@ describe('peerband status', () => {
       enrolledAt: '2026-01-02T03:04:05.000Z',
       herdr: { found: true, version: '0.9.3', pluginInstalled: true },
     });
+  });
+
+  it('shows whether messages are allowed (default) or read-only, in JSON and text', async () => {
+    const home = await loggedInHome();
+    const allowed = await runCli(['status', '--json'], { env: { PEERBAND_CONFIG_HOME: home } });
+    expect(JSON.parse(allowed.stdout).messages).toBe('allowed');
+    expect((await runCli(['status'], { env: { PEERBAND_CONFIG_HOME: home } })).stdout).toMatch(/^Messages\s+allowed/m);
+    await writeFile(join(home, 'connector.json'), '{"enableWrites": false}');
+    const readOnly = await runCli(['status', '--json'], { env: { PEERBAND_CONFIG_HOME: home } });
+    expect(JSON.parse(readOnly.stdout).messages).toBe('read-only');
+    expect((await runCli(['status'], { env: { PEERBAND_CONFIG_HOME: home } })).stdout).toMatch(/^Messages\s+read-only/m);
+    await writeFile(join(home, 'connector.json'), '{"enableWrites": true}');
+    expect(JSON.parse((await runCli(['status', '--json'], { env: { PEERBAND_CONFIG_HOME: home } })).stdout).messages).toBe('allowed');
+    await writeFile(join(home, 'connector.json'), 'not json');
+    expect(JSON.parse((await runCli(['status', '--json'], { env: { PEERBAND_CONFIG_HOME: home } })).stdout).messages).toBeNull();
   });
 
   it('falls back to the saved relay snapshot and reports it as not running', async () => {

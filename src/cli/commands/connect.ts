@@ -2,8 +2,6 @@ import { resolve } from 'node:path';
 import {
   ConnectorCore,
   MockRuntime,
-  connectorConfigPath,
-  loadConnectorConfig,
   receiptsPath,
   runRemoteClient,
   validateServerUrl,
@@ -14,7 +12,7 @@ import { HerdrAdapter } from '../../runtime-herdr/index.js';
 import { flag, str } from '../args.js';
 import { sanitize, symbols, type Style } from '../output.js';
 import { CliError, type CommandSpec, type Ctx, UsageError } from '../types.js';
-import { describeMachine, requireCredentials } from './shared.js';
+import { describeMachine, loadMachineConnectorConfig, requireCredentials, writesEnabled } from './shared.js';
 
 type ConnectionState = Parameters<NonNullable<RemoteOptions['onConnectionState']>>[0];
 type Activity = Parameters<NonNullable<RemoteOptions['onActivity']>>[0];
@@ -57,19 +55,20 @@ export function activityLine(s: Style, activity: Activity, at = new Date()): str
 export const spec: CommandSpec = {
   name: 'connect',
   summary: 'Run the connector in the foreground',
-  usage: 'peerband connect [--runtime herdr|mock] [--enable-writes] [--config PATH] [--server URL]',
+  usage: 'peerband connect [--runtime herdr|mock] [--read-only] [--config PATH] [--server URL]',
   description:
-    'Connects this machine to PeerBand and serves agent requests from your MCP clients until you press Ctrl+C. Without --enable-writes the connector is read-only. Activity lines show metadata only (tool, target, outcome, latency), never message or output content. Most people use `peerband relay` instead, which runs the connector inside Herdr.',
+    'Connects this machine to PeerBand and serves agent requests from your MCP clients until you press Ctrl+C. MCP clients may send messages to agents by default, but only after you approve the agents:message consent when you connect them; pass --read-only (or set "enableWrites": false in connector.json) to make this machine read-only. Activity lines show metadata only (tool, target, outcome, latency), never message or output content. Most people use `peerband relay` instead, which runs the connector inside Herdr.',
   options: [
     { name: 'runtime', type: 'string', valueName: 'herdr|mock', description: 'Agent runtime. Default: $PEERBAND_RUNTIME or herdr. "mock" serves fake agents for testing.' },
-    { name: 'enable-writes', type: 'boolean', description: 'Allow MCP clients to send messages to agents (also: "enableWrites": true in connector.json).' },
+    { name: 'read-only', type: 'boolean', description: 'Do not allow MCP clients to send messages to agents on this machine (also: "enableWrites": false in connector.json).' },
+    { name: 'enable-writes', type: 'boolean', description: 'Redundant: sending messages is allowed by default. Kept so old scripts keep working.' },
     { name: 'config', type: 'string', valueName: 'PATH', description: 'Connector config file. Default: $PEERBAND_CONNECTOR_CONFIG or connector.json in the config directory (optional).' },
     { name: 'server', type: 'string', valueName: 'URL', description: 'Override the server stored at login.' },
     { name: 'managed', type: 'boolean', hidden: true, description: 'Internal: run under the Herdr plugin supervisor over IPC.' },
   ],
   examples: [
-    ['peerband connect', 'Serve read-only until Ctrl+C'],
-    ['peerband connect --enable-writes', 'Also allow sending messages to agents'],
+    ['peerband connect', 'Serve until Ctrl+C; messages to agents are allowed (with OAuth consent)'],
+    ['peerband connect --read-only', 'Never let MCP clients send messages to agents from this machine'],
     ['peerband connect --runtime mock', 'Try the connection with fake agents'],
   ],
   async run(parsed, ctx) {
@@ -77,6 +76,7 @@ export const spec: CommandSpec = {
       {
         runtime: str(parsed, 'runtime'),
         enableWrites: flag(parsed, 'enable-writes'),
+        readOnly: flag(parsed, 'read-only'),
         config: str(parsed, 'config'),
         server: str(parsed, 'server'),
         managed: flag(parsed, 'managed'),
@@ -89,6 +89,7 @@ export const spec: CommandSpec = {
 export interface ConnectOptions {
   runtime?: string;
   enableWrites?: boolean;
+  readOnly?: boolean;
   config?: string;
   server?: string;
   managed?: boolean;
@@ -109,11 +110,9 @@ export async function connect(options: ConnectOptions, ctx: Ctx): Promise<number
   if (runtime !== 'herdr' && runtime !== 'mock') throw new UsageError(`Unknown runtime "${runtime}".`, 'Use --runtime herdr or --runtime mock.');
   const credentials = await requireCredentials(ctx);
   if (options.server) credentials.serverUrl = validateServerUrl(options.server);
-  const explicitConfig = options.config ?? ctx.env.PEERBAND_CONNECTOR_CONFIG;
-  const config = explicitConfig
-    ? await loadConnectorConfig(resolve(explicitConfig))
-    : await loadConnectorConfig(connectorConfigPath({ env: ctx.env }), { optional: true });
-  const enableWrites = Boolean(options.enableWrites) || config.enableWrites === true;
+  if (options.readOnly && options.enableWrites) throw new UsageError('--read-only and --enable-writes contradict each other.', 'Use --read-only to turn messaging off; messaging is on by default.');
+  const config = await loadMachineConnectorConfig(ctx, options.config);
+  const enableWrites = writesEnabled(config, { readOnly: options.readOnly, enableWrites: options.enableWrites });
   const managed = Boolean(options.managed);
   const s = ctx.out.stderr;
   const machine = describeMachine(credentials);
@@ -160,7 +159,7 @@ export async function connect(options: ConnectOptions, ctx: Ctx): Promise<number
     await core.initialize();
     if (!managed) {
       ctx.out.warn(
-        `${s.bold('peerband')} ${s.dim(`${runtime} runtime, ${enableWrites ? 'writes enabled' : 'read-only'}. Press Ctrl+C to stop.`)}`,
+        `${s.bold('peerband')} ${s.dim(`${runtime} runtime, ${enableWrites ? 'messages allowed' : 'read-only'}. Press Ctrl+C to stop.`)}`,
       );
     }
     await runRemoteClient(core, credentials, {

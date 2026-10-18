@@ -12,7 +12,7 @@ This repository is the PeerBand client: the `peerband` CLI, the connector that d
 
 - credential storage and handling (`credentials.json`, enrollment grants)
 - the outbound relay connection and request handling
-- the opt-in write path (`send_agent_message`) and its authorization checks
+- the write path (`send_agent_message`) and its authorization checks
 - the installers (`install/install.sh`, `install/install.ps1`)
 - the Herdr plugin launcher and process ownership
 
@@ -20,7 +20,8 @@ This repository is the PeerBand client: the `peerband` CLI, the connector that d
 
 - The connector only makes outbound connections. It never listens for inbound ones.
 - The credential file is created user-only (mode 0600 in a 0700 directory).
-- Writes are disabled unless you opt in with `--enable-writes` or `enableWrites` in `connector.json`.
+- Sending messages to agents (`send_agent_message`) is allowed by default, but a request is only honoured if the MCP client holds the `agents:message` OAuth scope that the user approved at consent. Machines can opt out with `peerband connect --read-only` or `"enableWrites": false` in `connector.json`; the connector then rejects every send. `peerband status` and the Relay tab show which mode applies.
+- `peerband relay` and `peerband status` check that the installed Herdr plugin is the release matching the CLI and uses the same config directory, and offer a repair when it does not.
 - The activity log is metadata only; prompts and agent output are not persisted.
 - `peerband logout` deletes the local credential but does not revoke it. Revoke machines from your PeerBand dashboard.
 

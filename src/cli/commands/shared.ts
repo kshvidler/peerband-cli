@@ -1,4 +1,5 @@
-import { ConfigError, credentialsPath, loadCredentials, mcpUrlFor, type Credentials } from '../../core/index.js';
+import { resolve } from 'node:path';
+import { ConfigError, connectorConfigPath, credentialsPath, loadConnectorConfig, loadCredentials, mcpUrlFor, type ConnectorConfig, type Credentials } from '../../core/index.js';
 import { CliError, EXIT_NOT_LOGGED_IN, type Ctx } from '../types.js';
 
 export const credentialsFile = (ctx: Ctx): string => credentialsPath({ env: ctx.env });
@@ -13,6 +14,29 @@ export async function requireCredentials(ctx: Ctx): Promise<Credentials> {
     }
     throw error;
   }
+}
+
+/** The connector config this machine uses: an explicit path, $PEERBAND_CONNECTOR_CONFIG, or connector.json in the config home (optional). */
+export async function loadMachineConnectorConfig(ctx: Ctx, explicitPath?: string): Promise<ConnectorConfig> {
+  const explicit = explicitPath ?? ctx.env.PEERBAND_CONNECTOR_CONFIG;
+  return explicit ? loadConnectorConfig(resolve(explicit)) : loadConnectorConfig(connectorConfigPath({ env: ctx.env }), { optional: true });
+}
+
+/**
+ * Messaging to agents is on by default (the gate is the OAuth consent for agents:message).
+ * Precedence: --read-only, then --enable-writes (redundant, kept for old scripts), then "enableWrites" in connector.json.
+ */
+export function writesEnabled(config: ConnectorConfig, flags: { readOnly?: boolean; enableWrites?: boolean } = {}): boolean {
+  if (flags.readOnly) return false;
+  if (flags.enableWrites) return true;
+  return config.enableWrites !== false;
+}
+
+export const SKILL_COMMAND = 'npx skills add kshvidler/peerband-cli';
+
+/** One-time suggestion at the end of a successful setup. */
+export function printSkillTip(ctx: Ctx): void {
+  ctx.out.print(ctx.out.stdout.dim(`Give your coding agents the PeerBand skill: ${SKILL_COMMAND}`));
 }
 
 export const describeMachine = (credentials: Credentials): string =>

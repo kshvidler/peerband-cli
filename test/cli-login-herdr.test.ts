@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { loadCredentials } from '../src/core/index.js';
 import type { ReadableLike } from '../src/cli/types.js';
 import { cleanupAll, fakeHerdr, runCli, tempDir } from './cli-helpers.js';
+import { pluginFor, TEST_VERSION } from './cli-plugin-helpers.js';
 
 afterEach(cleanupAll);
 
@@ -62,8 +63,10 @@ describe('peerband login: Herdr setup', () => {
   });
 
   it('only suggests peerband relay when the plugin is already installed', async () => {
-    const herdr = pluginHerdr('unused', { installed: true });
-    const r = await login([], herdr);
+    const home = await tempDir();
+    const { herdr } = await pluginFor(home);
+    const result = await runCli(['login', '--grant', 'GRANT-1'], { env: { PEERBAND_CONFIG_HOME: home }, overrides: { fetch: redeem, runHerdr: herdr.run, version: TEST_VERSION } });
+    const r = { ...result, stdout: result.stdout.replace(/\u001b\[[0-9;]*m/g, '') };
     expect(r.code).toBe(0);
     expect(r.stdout).toContain('Next: peerband relay');
     expect(r.stdout).not.toContain('herdr install');
