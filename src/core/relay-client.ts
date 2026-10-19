@@ -77,12 +77,14 @@ export async function redeemEnrollment(
   grant: string,
   name: string,
   fetcher: typeof fetch = fetch,
+  previousCredential?: string,
 ): Promise<RemoteCredentials> {
   const base = enrollmentBase(serverUrl);
   const response = await fetcher(new URL("/api/enrollments/redeem", base), {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ grant, name }),
+    // previous_credential lets the server keep this machine's record (see DeviceLoginOptions).
+    body: JSON.stringify({ grant, name, ...(previousCredential ? { previous_credential: previousCredential } : {}) }),
     signal: AbortSignal.timeout(15_000),
   });
   const body = (await response.json().catch(() => ({}))) as Record<

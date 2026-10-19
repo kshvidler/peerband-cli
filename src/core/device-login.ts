@@ -45,6 +45,12 @@ export interface DeviceLoginOptions {
   sleep?: Sleep;
   /** Milliseconds clock. */
   now?: () => number;
+  /**
+   * The credential this login replaces (same server only). When the approving
+   * account owns it, the server keeps the machine record, so its ID and any
+   * shares survive, and rotates the credential.
+   */
+  previousCredential?: string;
 }
 
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -154,7 +160,11 @@ export async function pollDeviceToken(serverUrl: string, code: DeviceCode, optio
 
     let result;
     try {
-      result = await postJson(url, { device_code: code.deviceCode }, options);
+      result = await postJson(
+        url,
+        { device_code: code.deviceCode, ...(options.previousCredential ? { previous_credential: options.previousCredential } : {}) },
+        options,
+      );
     } catch {
       if (options.signal?.aborted) throw aborted();
       failures = Math.min(failures + 1, 10);

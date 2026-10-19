@@ -57,6 +57,25 @@ describe('peerband login', () => {
     expect((await loadCredentials(join(home, 'credentials.json'))).installationId).toBe('inst-1');
   });
 
+  it('presents the previous credential to the same server so the machine record is kept', async () => {
+    const home = await tempDir();
+    await saveCredentials({ serverUrl: 'https://peerband.com', installationId: 'inst-1', credential: 'old-secret', machineName: 'work-box' }, join(home, 'credentials.json'));
+    const seen: Redeem[] = [];
+    const result = await runCli(['login', '--grant', 'g', '--name', 'work-box'], { env: { PEERBAND_CONFIG_HOME: home }, overrides: { fetch: fakeRedeem({ body: granted }, seen) } });
+    expect(seen[0]?.body).toEqual({ grant: 'g', name: 'work-box', previous_credential: 'old-secret' });
+    expect(result.stdout).toContain('Kept this machine in your account');
+    expect(result.stdout + result.stderr).not.toContain('old-secret');
+    expect((await loadCredentials(join(home, 'credentials.json'))).credential).toBe('secret-credential');
+  });
+
+  it('never sends the previous credential to a different server', async () => {
+    const home = await tempDir();
+    await saveCredentials({ serverUrl: 'https://other.example', installationId: 'old', credential: 'old-secret' }, join(home, 'credentials.json'));
+    const seen: Redeem[] = [];
+    await runCli(['login', '--grant', 'g', '--name', 'x'], { env: { PEERBAND_CONFIG_HOME: home }, overrides: { fetch: fakeRedeem({ body: granted }, seen) } });
+    expect(seen[0]?.body).toEqual({ grant: 'g', name: 'x' });
+  });
+
   it('reports server validation errors with a next step and saves nothing', async () => {
     const home = await tempDir();
     const result = await runCli(['login', '--grant', 'bad'], {
