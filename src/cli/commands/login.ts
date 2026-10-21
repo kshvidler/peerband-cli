@@ -20,6 +20,21 @@ export interface GrantLoginOptions {
   serverUrl: string;
   grant: string;
   name: string;
+  previousCredential?: string;
+}
+
+/**
+ * The stored credential to present when logging in again, so the server keeps
+ * this machine's record (installation ID and shares). Only ever sent back to
+ * the server that issued it.
+ */
+export function reusableCredential(previous: Credentials | undefined, serverUrl: string): string | undefined {
+  if (!previous) return undefined;
+  try {
+    return new URL(previous.serverUrl).origin === new URL(serverUrl).origin ? previous.credential : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function persist(ctx: Ctx, redeemed: Credentials): Promise<Credentials> {
@@ -32,7 +47,7 @@ async function persist(ctx: Ctx, redeemed: Credentials): Promise<Credentials> {
 export async function loginWithGrant(ctx: Ctx, options: GrantLoginOptions): Promise<Credentials> {
   let redeemed: Credentials;
   try {
-    redeemed = await redeemEnrollment(options.serverUrl, options.grant, options.name, ctx.fetch);
+    redeemed = await redeemEnrollment(options.serverUrl, options.grant, options.name, ctx.fetch, options.previousCredential);
   } catch (error) {
     const message = (error as Error).message;
     const rejected = /could not be redeemed/i.test(message);
@@ -50,7 +65,7 @@ const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', 
 const GRANT_HINT = 'Use `peerband login --grant GRANT` (create a grant in the dashboard).';
 
 /** Browser sign-in: show a code, let the user approve it in the dashboard, then store the credential. */
-export async function loginWithBrowser(ctx: Ctx, options: { serverUrl: string; name: string; noBrowser: boolean }): Promise<Credentials> {
+export async function loginWithBrowser(ctx: Ctx, options: { serverUrl: string; name: string; noBrowser: boolean; previousCredential?: string }): Promise<Credentials> {
   const controller = new AbortController();
   const forward = () => controller.abort();
   let onSigint: (() => void) | undefined;
@@ -113,7 +128,7 @@ export async function loginWithBrowser(ctx: Ctx, options: { serverUrl: string; n
 
     let redeemed: Credentials;
     try {
-      redeemed = await pollDeviceToken(options.serverUrl, code, shared);
+      redeemed = await pollDeviceToken(options.serverUrl, code, { ...shared, ...(options.previousCredential ? { previousCredential: options.previousCredential } : {}) });
     } catch (error) {
       throw mapFailure(error, options.serverUrl);
     } finally {
@@ -154,7 +169,7 @@ export const spec: CommandSpec = {
   summary: 'Connect this machine to your PeerBand account',
   usage: 'peerband login [--name NAME] [--no-browser] [--server URL] [--herdr-plugin ask|install|skip]\n  peerband login --grant GRANT [--name NAME] [--server URL]',
   description:
-    'Signs this machine in through your browser. login prints a link and a short code, opens the page (unless you are on SSH, a headless machine or pass --no-browser), and waits while you confirm the code in your PeerBand account. The credential is stored in your PeerBand config directory (readable only by you). Running login again replaces the existing enrollment.\n\nOn a headless machine or in CI, use a one-time grant instead: create it in the PeerBand dashboard and pass --grant GRANT (or set PEERBAND_GRANT).\n\nWhen login succeeds it checks for Herdr. If the PeerBand plugin is missing, or installed but wrong (another version, a local checkout, a stale config directory), it offers to add or repair it (--herdr-plugin ask, the default; it only asks on a terminal), adds it without asking (install), or just prints the command (skip).',
+    'Signs this machine in through your browser. login prints a link and a short code, opens the page (unless you are on SSH, a headless machine or pass --no-browser), and waits while you confirm the code in your PeerBand account. The credential is stored in your PeerBand config directory (readable only by you). Running login again replaces the stored credential; when you sign in to the same account and server, this machine keeps its record in your account (installation ID and shares).\n\nOn a headless machine or in CI, use a one-time grant instead: create it in the PeerBand dashboard and pass --grant GRANT (or set PEERBAND_GRANT).\n\nWhen login succeeds it checks for Herdr. If the PeerBand plugin is missing, or installed but wrong (another version, a local checkout, a stale config directory), it offers to add or repair it (--herdr-plugin ask, the default; it only asks on a terminal), adds it without asking (install), or just prints the command (skip).',
   options: [
     { name: 'no-browser', type: 'boolean', description: 'Do not open a browser; print the link and code only (SSH, containers).' },
     { name: 'name', type: 'string', valueName: 'NAME', description: "Name shown for this machine in the dashboard. Default: this computer's hostname." },
@@ -181,11 +196,14 @@ export const spec: CommandSpec = {
     delete ctx.env.PEERBAND_GRANT;
     if (parsed.values.grant !== undefined && !grant) throw new UsageError('The grant is empty.', 'Pass the grant from your PeerBand dashboard: --grant GRANT.');
     const previous = await loadCredentials(credentialsFile(ctx)).catch(() => undefined);
+    const previousCredential = reusableCredential(previous, serverUrl);
     const credentials = grant
-      ? await loginWithGrant(ctx, { serverUrl, grant, name })
-      : await loginWithBrowser(ctx, { serverUrl, name, noBrowser: parsed.values['no-browser'] === true });
+      ? await loginWithGrant(ctx, { serverUrl, grant, name, ...(previousCredential ? { previousCredential } : {}) })
+      : await loginWithBrowser(ctx, { serverUrl, name, noBrowser: parsed.values['no-browser'] === true, ...(previousCredential ? { previousCredential } : {}) });
     const s = ctx.out.stdout;
-    if (previous) ctx.out.print(s.dim(`Replaced the previous login (${previous.machineName ?? previous.installationId} on ${previous.serverUrl}).`));
+    if (previous && previous.installationId === credentials.installationId && previous.serverUrl === credentials.serverUrl)
+      ctx.out.print(s.dim('Kept this machine in your account with a new credential; its shares stay in place.'));
+    else if (previous) ctx.out.print(s.dim(`Replaced the previous login (${previous.machineName ?? previous.installationId} on ${previous.serverUrl}).`));
     const who = credentials.accountEmail ? ` (${credentials.accountEmail})` : '';
     ctx.out.print(`${s.green(symbols.ok)} Logged in as ${s.bold(credentials.machineName ?? name)}${who}`);
     await herdrSetup(ctx, herdrMode);

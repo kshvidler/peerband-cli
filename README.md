@@ -89,6 +89,7 @@ The plugin adds a persistent tab titled `PeerBand Relay [On]` or `[Off]` that sh
 | `peerband status` | Show login, relay, messaging and Herdr state, including whether the Herdr plugin is the right one. `--json` for machine-readable output |
 | `peerband connect` | Run the connector in the foreground. Flags: `--runtime herdr\|mock`, `--read-only`, `--config PATH`, `--server URL` (`--enable-writes` is still accepted but redundant) |
 | `peerband relay` | Open or focus the Relay tab in Herdr. If the plugin is missing the wrong version, a local checkout, or points at another config directory, it offers to repair it first |
+| `peerband share` | Create a single-use invite link that shares this machine with another PeerBand user (read only; `--message` also allows messages; `--expires DAYS`, default 7). `share list` shows who has access and unused links; `share revoke ID` removes access or cancels a link |
 | `peerband herdr install` | Install (or update) the Herdr plugin |
 | `peerband herdr uninstall` | Stop the relay, remove the plugin and its `settings.json` |
 | `peerband --version`, `help [command]` | Version and help |

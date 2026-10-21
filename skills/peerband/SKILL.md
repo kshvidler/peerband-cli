@@ -14,11 +14,11 @@ PeerBand lets an MCP client (Claude, ChatGPT, Claude Code, any client with remot
 3. `peerband relay` - opens the PeerBand Relay tab in Herdr and connects the machine.
 4. Add the MCP server `https://mcp.peerband.com/mcp` to the client: a custom connector in Claude or ChatGPT, or in Claude Code `claude mcp add --transport http peerband https://mcp.peerband.com/mcp`. Sign in and approve access.
 
-Other commands: `peerband status` (login, relay, plugin health, installation ID), `peerband connect` (run the connector in the foreground; `--read-only` blocks messages), `peerband herdr install` (install or repair the plugin), `peerband logout`.
+Other commands: `peerband status` (login, relay, plugin health, installation ID), `peerband connect` (run the connector in the foreground; `--read-only` blocks messages), `peerband herdr install` (install or repair the plugin), `peerband share` (invite another PeerBand user to this machine; `share list`, `share revoke ID`), `peerband logout`.
 
 ## MCP tools
 
-Call `list_machines` first: it lists the machines this account can reach, with `installation_id`, name and an online flag. The five agent tools take an `installation_id` (also shown as "Installation" by `peerband status` and in the PeerBand dashboard). It is optional when the account has exactly one machine; with several machines, omitting it fails with `machine_required` and you must pass one. Recommended flow: `list_machines` -> `list_agents` -> `get_agent_status` / `get_agent_output` -> `send_agent_message` -> `get_request_status`.
+Call `list_machines` first: it lists the machines this account can reach, with `installation_id`, name and an online flag. The five agent tools take an `installation_id` (also shown as "Installation" by `peerband status` and in the PeerBand dashboard). It is optional when the account has exactly one machine; with several machines, omitting it fails with `machine_required` and you must pass one. Machines other users shared with this account are listed too, with `shared_by` (the owner's email) and `access` (`read`, or `message` when messages are allowed); always pass their `installation_id` explicitly, and tell the user whose machine it is. Sending to a read-only share fails with `forbidden`. Recommended flow: `list_machines` -> `list_agents` -> `get_agent_status` / `get_agent_output` -> `send_agent_message` -> `get_request_status`.
 
 | Tool | Kind | Arguments |
 | --- | --- | --- |
