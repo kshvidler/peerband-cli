@@ -85,13 +85,14 @@ The plugin adds a persistent tab titled `PeerBand Relay [On]` or `[Off]` that sh
 | Command | What it does |
 | --- | --- |
 | `peerband login` | Sign in through your browser, then offer to add the Herdr plugin. Flags: `--no-browser`, `--name NAME`, `--server URL`, `--herdr-plugin ask\|install\|skip`; headless/CI: `--grant GRANT` |
-| `peerband logout` | Stop a running relay and delete the local credential. Does not revoke it on the server |
+| `peerband logout` | Stop a running relay, close its tab, delete the local relay state and the local credential. Does not revoke it on the server |
 | `peerband status` | Show login, relay, messaging and Herdr state, including whether the Herdr plugin is the right one. `--json` for machine-readable output |
+| `peerband update` | Update the CLI from npm and then the Herdr plugin to match, restarting the relay if it was running. Already up to date: checks the plugin and repairs it. Flags: `--check` (only report), `--yes`, `--json` |
 | `peerband connect` | Run the connector in the foreground. Flags: `--runtime herdr\|mock`, `--read-only`, `--config PATH`, `--server URL` (`--enable-writes` is still accepted but redundant) |
 | `peerband relay` | Open or focus the Relay tab in Herdr. If the plugin is missing the wrong version, a local checkout, or points at another config directory, it offers to repair it first |
 | `peerband share` | Create a single-use invite link that shares this machine with another PeerBand user (read only; `--message` also allows messages; `--expires DAYS`, default 7). `share list` shows who has access and unused links; `share revoke ID` removes access or cancels a link |
-| `peerband herdr install` | Install (or update) the Herdr plugin |
-| `peerband herdr uninstall` | Stop the relay, remove the plugin and its `settings.json` |
+| `peerband herdr install` | Install (or update) the Herdr plugin. Stops the relay and closes its tab first, puts the previous plugin back if the new one fails, and reopens the tab afterwards |
+| `peerband herdr uninstall` | Stop the relay, close its tab, remove the plugin and its `settings.json`, and delete the local relay state and stale locks (your login is kept) |
 | `peerband --version`, `help [command]` | Version and help |
 
 Exit codes: 0 success, 1 failure, 2 usage error, 3 not logged in, 130 interrupted (Ctrl+C in `peerband connect`).
@@ -148,6 +149,9 @@ Herdr may resolve a different (older) `node` than your shell. `peerband herdr in
 
 ## Troubleshooting
 
+- **Updating.** Run `peerband update`. It installs the latest CLI with `npm install -g`, then the new CLI stops the relay, closes the Relay tab (on Windows its processes keep the plugin files open, which makes Herdr fail with "os error 32 ... being used by another process"), replaces the plugin, clears stale locks and reopens the tab. If you already ran `npm install -g peerband` yourself, `peerband update` (or `peerband herdr install`) brings the plugin up to the same version. `peerband update --check` only reports. From npx or a source checkout it prints the command to run instead.
+- **"Existing helper lock could not be verified" / "Another PeerBand helper still holds the relay lock".** A lock whose owner process has exited is reclaimed automatically (also for locks written by older versions, when no helper answers). If the message names a running process, end it or run `peerband herdr install`, which stops the relay cleanly.
+- **Several PeerBand Relay tabs.** `peerband relay` and Herdr's startup hook focus the existing tab instead of opening another. `peerband herdr install` closes all of them and reopens one.
 - **"PeerBand needs Node.js 22.13 or newer" inside Herdr.** Run `peerband herdr install` from a shell whose `node --version` is 22.13+.
 - **The Relay tab does not open.** Check `peerband status` for the plugin, run `herdr plugin list` (look for a line like `- peerband (PeerBand) enabled [github:kshvidler/peerband-cli@v0.1.0]`), and confirm Herdr is 0.9.3 or newer. Then `peerband relay`.
 - **Windows: Herdr cannot see files in AppData.** Set `PEERBAND_CONFIG_HOME` to a plain folder (for example `D:\peerband`), log in again, and rerun `peerband herdr install` so the plugin picks it up.

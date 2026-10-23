@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, rmdir, unlink, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { mkdir, readFile, rename, rm, rmdir, unlink, writeFile } from 'node:fs/promises';
+import { hostname } from 'node:os';
+import { dirname, join } from 'node:path';
 
 export type AgentStatus = 'idle' | 'working' | 'blocked' | 'done' | 'unknown';
 
@@ -174,6 +175,43 @@ export interface ConnectorCoreOptions {
   allowedWorkspaces?: string[];
   receiptPath?: string;
   retentionMs?: number;
+  /**
+   * Decides whether an existing receipt-store lock is stale (its owner is gone). The default reclaims a lock whose
+   * recorded pid on this host is not alive and keeps every other lock, including legacy ones without a pid.
+   */
+  lockIsStale?: (lockDir: string, ownerFile: string) => Promise<boolean>;
+  /** Called with one line when a stale lock was reclaimed. */
+  onLockReclaimed?: (message: string) => void;
+}
+
+/** Content of the receipt-store lock's `owner` file. Older versions wrote a bare uuid. */
+interface LockOwner { owner: string; pid: number; hostname: string; startedAt: string }
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return isRecord(error) && error.code === 'EPERM';
+  }
+}
+
+/** Default staleness rule: the owner recorded a pid on this host and that process no longer exists. */
+export async function receiptLockOwnerDead(_lockDir: string, ownerFile: string): Promise<boolean> {
+  let owner: unknown;
+  try { owner = JSON.parse(await readFile(ownerFile, 'utf8')); } catch { return false; }
+  if (!isRecord(owner) || !Number.isSafeInteger(owner.pid) || (owner.pid as number) <= 0) return false;
+  if (typeof owner.hostname === 'string' && owner.hostname !== hostname()) return false;
+  return !pidAlive(owner.pid as number);
+}
+
+/** The owner id recorded in a lock file (JSON or legacy bare uuid). */
+function lockOwnerId(text: string): string {
+  try {
+    const value = JSON.parse(text) as unknown;
+    if (isRecord(value) && typeof value.owner === 'string') return value.owner;
+  } catch { /* legacy */ }
+  return text;
 }
 
 type ReceiptState = 'queued' | 'dispatching' | 'delivered' | 'failed' | 'delivery_unknown';
@@ -216,6 +254,8 @@ export class ConnectorCore {
   private readonly allowedWorkspaces?: Set<string>;
   private readonly retentionMs: number;
   private readonly receiptPath?: string;
+  private readonly lockIsStale: (lockDir: string, ownerFile: string) => Promise<boolean>;
+  private readonly onLockReclaimed?: (message: string) => void;
   private lockOwner?: string;
   private get lockPath(): string | undefined { return this.receiptPath ? `${this.receiptPath}.lock` : undefined; }
   private persistQueue: Promise<void> = Promise.resolve();
@@ -231,6 +271,8 @@ export class ConnectorCore {
     this.allowedAgents = options.allowedAgents ? new Set(options.allowedAgents) : undefined;
     this.allowedWorkspaces = options.allowedWorkspaces ? new Set(options.allowedWorkspaces) : undefined;
     this.receiptPath = options.receiptPath;
+    this.lockIsStale = options.lockIsStale ?? receiptLockOwnerDead;
+    this.onLockReclaimed = options.onLockReclaimed;
     this.retentionMs = options.retentionMs ?? DEFAULT_RETENTION_MS;
     if (!Number.isSafeInteger(this.retentionMs) || this.retentionMs < 60_000 || this.retentionMs > 365 * 24 * 60 * 60 * 1000) {
       throw new ConnectError('invalid_argument', 'retentionMs is outside the supported range.', 'Choose retention from one minute to one year.');
@@ -503,21 +545,42 @@ export class ConnectorCore {
     const lockPath = this.lockPath;
     if (!lockPath || !this.receiptPath) return;
     await mkdir(dirname(this.receiptPath), { recursive: true });
-    try {
-      await mkdir(lockPath, { mode: 0o700 });
-    } catch (error) {
-      if (isRecord(error) && error.code === 'EEXIST') throw new ConnectError('receipt_store_locked', 'Another connector process owns this receipt store.', 'Stop the other process or configure a separate state directory.');
-      throw error;
+    const ownerFile = join(lockPath, 'owner');
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await mkdir(lockPath, { mode: 0o700 });
+        break;
+      } catch (error) {
+        if (!(isRecord(error) && error.code === 'EEXIST')) throw error;
+      }
+      if (attempt === 0 && (await this.lockIsStale(lockPath, ownerFile).catch(() => false)) && (await this.reclaimStaleLock(lockPath, ownerFile))) continue;
+      throw new ConnectError('receipt_store_locked', 'Another connector process owns this receipt store.', 'Stop the other process or configure a separate state directory.');
     }
     const owner = randomUUID();
     this.lockOwner = owner;
+    const record: LockOwner = { owner, pid: process.pid, hostname: hostname(), startedAt: new Date().toISOString() };
     try {
-      await writeFile(`${lockPath}/owner`, owner, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+      await writeFile(ownerFile, JSON.stringify(record), { encoding: 'utf8', flag: 'wx', mode: 0o600 });
     } catch (error) {
       this.lockOwner = undefined;
       try { await rmdir(lockPath); } catch { /* Keep unexpected contents for inspection. */ }
       throw error;
     }
+  }
+
+  /** Moves the stale lock aside (atomic, one winner), checks it is the one inspected, then deletes it. */
+  private async reclaimStaleLock(lockPath: string, ownerFile: string): Promise<boolean> {
+    const before = await readFile(ownerFile, 'utf8').catch(() => null);
+    const quarantine = `${lockPath}.stale-${randomUUID()}`;
+    try { await rename(lockPath, quarantine); } catch { return false; }
+    const moved = await readFile(join(quarantine, 'owner'), 'utf8').catch(() => null);
+    if (moved !== before) {
+      await rename(quarantine, lockPath).catch(() => undefined);
+      return false;
+    }
+    await rm(quarantine, { recursive: true, force: true }).catch(() => undefined);
+    this.onLockReclaimed?.(`Reclaimed a stale receipt-store lock ${lockPath}${before ? ` (previous owner: ${before.slice(0, 200)})` : ''}.`);
+    return true;
   }
 
   private async releaseLock(): Promise<void> {
@@ -526,7 +589,7 @@ export class ConnectorCore {
     if (!lockPath || !owner) return;
     try {
       const currentOwner = await readFile(`${lockPath}/owner`, 'utf8');
-      if (currentOwner !== owner) return;
+      if (lockOwnerId(currentOwner) !== owner) return;
       await unlink(`${lockPath}/owner`);
       await rmdir(lockPath);
     } catch (error) {

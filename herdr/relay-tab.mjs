@@ -122,6 +122,15 @@ async function inspectOwned(run, record) {
   return pane;
 }
 
+// A pane carrying our ownership marker token, i.e. one opened (and verified) by a Relay tab controller.
+async function findMarkedPane(run) {
+  let listed;
+  try { listed = (await run(["pane", "list"])).panes; }
+  catch { return undefined; }
+  if (!Array.isArray(listed)) return undefined;
+  return listed.find((item) => typeof item?.pane_id === "string" && typeof item.tokens?.[markerName] === "string" && item.tokens[markerName]);
+}
+
 async function renameOwnedSinglePaneTab(run, pane, label) {
   if (!pane?.workspace_id || !pane?.tab_id || !pane?.pane_id) return false;
   let listed;
@@ -173,6 +182,14 @@ export function createRelayTabController({ run, statePath, pluginPaneId = "", ne
       if (pane) {
         await run(["plugin", "pane", "focus", pane.pane_id]);
         return pane.pane_id;
+      }
+      // The record is missing or stale (another config, a crash, Herdr restarted), but a Relay pane this
+      // controller marked earlier may still be open: adopt and focus it instead of opening a duplicate.
+      const existing = await findMarkedPane(run);
+      if (existing) {
+        await writeRecord(statePath, { version: 1, paneId: existing.pane_id, marker: existing.tokens[markerName] });
+        await run(["plugin", "pane", "focus", existing.pane_id]);
+        return existing.pane_id;
       }
 
       // A stale state file never authorizes closing or renaming its old pane. Replace it with a

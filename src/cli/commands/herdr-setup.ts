@@ -2,7 +2,7 @@ import { symbols } from '../output.js';
 import { askYesNo, PromptAborted } from '../prompt.js';
 import { CliError, type Ctx } from '../types.js';
 import { installSpec } from './herdr.js';
-import { checkHerdrPlugin, REPAIR_COMMAND } from './herdr-check.js';
+import { checkHerdrPlugin, fixCommand, REPAIR_COMMAND } from './herdr-check.js';
 
 export type HerdrPluginMode = 'ask' | 'install' | 'skip';
 export const HERDR_PLUGIN_MODES: readonly HerdrPluginMode[] = ['ask', 'install', 'skip'];
@@ -68,7 +68,7 @@ export async function ensureHerdrPlugin(ctx: Ctx): Promise<void> {
   const check = await checkHerdrPlugin(ctx);
   if (!check.found || check.problems.length === 0) return;
   const s = ctx.out.stderr;
-  const fix = 'Run `peerband herdr install`, then `peerband relay`.';
+  const fix = `Run \`${fixCommand(check.problems[0])}\`, then \`peerband relay\`.`;
   const reasons = check.problems.map((problem) => problem.message);
   if (!(ctx.stdin.isTTY && ctx.stderr.isTTY)) throw new CliError(`The PeerBand Herdr plugin needs repair. ${reasons.join(' ')}`, fix);
 

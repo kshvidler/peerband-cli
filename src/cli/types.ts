@@ -24,6 +24,16 @@ export interface HerdrResult {
 }
 export type HerdrRunner = (args: string[], options?: { timeoutMs?: number }) => Promise<HerdrResult>;
 
+export interface ExecOptions {
+  timeoutMs?: number;
+  env?: NodeJS.ProcessEnv;
+  /** Streams output as it arrives (it is still collected in the result). */
+  onStdout?: (text: string) => void;
+  onStderr?: (text: string) => void;
+}
+/** Runs a program (npm, or the freshly installed CLI). `notFound` when it could not be started. */
+export type ExecRunner = (file: string, args: string[], options?: ExecOptions) => Promise<HerdrResult>;
+
 export interface Ctx {
   env: NodeJS.ProcessEnv;
   stdin: ReadableLike;
@@ -31,6 +41,10 @@ export interface Ctx {
   stderr: WritableLike;
   fetch: typeof fetch;
   runHerdr: HerdrRunner;
+  /** Test seam for `peerband update`: runs npm and the newly installed CLI. */
+  exec?: ExecRunner;
+  /** Test seam for `peerband update`: path of the running CLI script (default: process.argv[1]). */
+  selfPath?: string;
   /** Test seam for `peerband relay`; defaults to the shared herdr/relay-tab.mjs implementation. */
   openRelayTab?: () => Promise<string>;
   /** Test seams for `peerband login`: browser launcher, sleep, clock and a cancellation signal (Ctrl+C). */

@@ -1,3 +1,4 @@
+import { CONNECTOR_PATTERN, inspectLock } from '../herdr-js.js';
 import { resolve } from 'node:path';
 import {
   ConnectorCore,
@@ -123,6 +124,9 @@ export async function connect(options: ConnectOptions, ctx: Ctx): Promise<number
     allowedAgents: config.allowedAgents,
     allowedWorkspaces: config.allowedWorkspaces,
     receiptPath: config.stateDirectory ? resolve(config.stateDirectory, 'receipts.json') : receiptsPath({ env: ctx.env }),
+    // A lock left by a connector that died (or by an older version without a pid) is reclaimed instead of refusing forever.
+    lockIsStale: async (lockDir, ownerFile) => (await inspectLock({ lockDir, ownerFile, processPattern: CONNECTOR_PATTERN })).state === 'stale',
+    onLockReclaimed: (message) => ctx.out.warn(ctx.out.stderr.dim(`peerband: ${message}`)),
   });
 
   const abort = new AbortController();

@@ -17,6 +17,27 @@ afterEach(async () => {
 });
 
 describe('relay tab ownership', () => {
+
+  it('adopts and focuses an already-open marked Relay pane instead of opening a duplicate when the record is gone', async () => {
+    const statePath = await temporaryState();
+    const commands: string[][] = [];
+    const pane = { pane_id: 'w1:p7', tab_id: 'w1:t7', workspace_id: 'w1', label: 'PeerBand Relay [On]', tokens: { peerband_relay: 'old-marker' } };
+    const run = async (args: string[]) => {
+      commands.push(args);
+      if (args[0] === 'pane' && args[1] === 'list') return { panes: [{ pane_id: 'w1:p1', tab_id: 'w1:t1' }, pane] };
+      if (args[0] === 'pane' && args[1] === 'get') return { pane };
+      return {};
+    };
+    const controller = createRelayTabController({ run, statePath, newMarker: () => 'new-marker' });
+    await expect(controller.open()).resolves.toBe('w1:p7');
+    expect(commands.some((args) => args[0] === 'plugin' && args[2] === 'open')).toBe(false);
+    expect(commands).toContainEqual(['plugin', 'pane', 'focus', 'w1:p7']);
+    expect(JSON.parse(await readFile(statePath, 'utf8'))).toEqual({ version: 1, paneId: 'w1:p7', marker: 'old-marker' });
+    // The adopted record now verifies directly, without another list.
+    commands.length = 0;
+    await expect(controller.open()).resolves.toBe('w1:p7');
+    expect(commands[0]).toEqual(['pane', 'get', 'w1:p7']);
+  });
   it('accepts successful action output without weakening pane-data validation', () => {
     expect(parseHerdrCommandOutput('', ['tab', 'rename', 'w1:t1', 'PeerBand Relay [Off]'])).toEqual({});
     expect(parseHerdrCommandOutput('Updated tab', ['tab', 'rename', 'w1:t1', 'PeerBand Relay [Off]'])).toEqual({});
@@ -72,18 +93,20 @@ describe('relay tab ownership', () => {
     const pane = { pane_id: 'w1:p9', tab_id: 'w1:t9', workspace_id: 'w1', tokens: { peerband_relay: 'random-marker' } };
     const run = async (args: string[]) => {
       commands.push(args);
-      if (args[0] === 'plugin' && args[1] === 'pane' && args[2] === 'open') return { plugin_pane: { plugin_id: 'peerband', entrypoint: 'relay', pane: { ...pane, tokens: {} } } };
+      if (args[0] === 'plugin' && args[1] === 'pane' && args[2] === 'open') { opened = true; return { plugin_pane: { plugin_id: 'peerband', entrypoint: 'relay', pane: { ...pane, tokens: {} } } }; }
       if (args[0] === 'pane' && args[1] === 'report-metadata') return { type: 'pane_metadata_reported' };
       if (args[0] === 'pane' && args[1] === 'get') return { pane };
-      if (args[0] === 'pane' && args[1] === 'list') return { panes: [pane] };
+      if (args[0] === 'pane' && args[1] === 'list') return { panes: opened ? [pane] : [] };
       return {};
     };
+    let opened = false;
     const controller = createRelayTabController({ run, statePath, newMarker: () => 'random-marker' });
 
     await expect(controller.open()).resolves.toBe('w1:p9');
     const record = JSON.parse(await readFile(statePath, 'utf8'));
     expect(record).toEqual({ version: 1, paneId: 'w1:p9', marker: 'random-marker' });
-    expect(commands[0]).toEqual(['plugin', 'pane', 'open', '--plugin', 'peerband', '--entrypoint', 'relay', '--placement', 'tab', '--focus']);
+    expect(commands[0]).toEqual(['pane', 'list']);
+    expect(commands[1]).toEqual(['plugin', 'pane', 'open', '--plugin', 'peerband', '--entrypoint', 'relay', '--placement', 'tab', '--focus']);
     expect(commands.some((args) => args[0] === 'pane' && args[1] === 'report-metadata' && args.includes('peerband_relay=random-marker'))).toBe(true);
     expect(commands).toContainEqual(['tab', 'rename', 'w1:t9', 'PeerBand Relay [Off]']);
     expect(commands.findIndex((args) => args[0] === 'tab' && args[1] === 'rename'))
