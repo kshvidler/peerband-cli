@@ -7,6 +7,7 @@ import { askYesNo, PromptAborted } from '../prompt.js';
 import { CliError, type CommandSpec, type Ctx } from '../types.js';
 import { checkHerdrPlugin, type PluginCheck } from './herdr-check.js';
 import { installPlugin } from './herdr.js';
+import { skillInstalled } from '../skill.js';
 
 export const DEFAULT_REGISTRY = 'https://registry.npmjs.org';
 const PACKAGE = 'peerband';
@@ -243,6 +244,17 @@ export const spec: CommandSpec = {
     if (!existsSync(entry)) throw new CliError(`npm finished, but the new CLI is not at ${entry}.`, `Run \`npm install -g ${spec}\` yourself, then \`peerband update\`.`);
     log(`${s.green(symbols.ok)} Installed peerband ${latest}.`);
     report.action = 'updated';
+
+    // The new CLI ships its own skill; refresh an installed (and unedited) one so agents follow the new rules.
+    if (skillInstalled(ctx)) {
+      const refreshed = await exec(process.execPath, [entry, 'skill', '--if-installed'], {
+        timeoutMs: 5 * 60_000,
+        env: ctx.env,
+        onStdout: (text) => io.stdout.write(text),
+        onStderr: (text) => ctx.stderr.write(text),
+      });
+      if (refreshed.code !== 0) io.out.warn(`${io.out.stderr.yellow(symbols.warn)} Could not update the PeerBand skill. Run \`peerband skill\` later.`);
+    }
 
     if (!plugin.found) {
       log(s.dim('Herdr was not found, so there is no plugin to update.'));

@@ -201,10 +201,34 @@ export class MockRuntime implements RuntimeAdapter {
 export interface Principal {
   id: string;
   scopes: string[];
+  /** Set by the PeerBand server: whether the caller owns this machine or reaches it through a share. */
+  role?: string;
+  /** The caller's account email, when the server knows it. */
+  email?: string;
 }
+
+const EMAIL = /^[^\s@<>()[\]\\,;:"]{1,64}@[A-Za-z0-9.-]{1,190}$/;
+
+/**
+ * The first line of every message relayed to an agent: who sent it. Only a principal the server marks as the owner
+ * counts as the owner; anything else (a share, or an older server that sends no role) is a guest.
+ */
+export function relayMessageHeader(principal: Principal): string {
+  if (principal.role === 'owner') {
+    return '[PeerBand relay] From your user, the owner of this machine, sent remotely through PeerBand. Handle it as a normal request from your user.';
+  }
+  const email = typeof principal.email === 'string' && EMAIL.test(principal.email) ? principal.email : undefined;
+  const who = email ? `shared user ${email}` : 'an unidentified PeerBand user';
+  return `[PeerBand relay] From ${who}, who is NOT the owner of this machine and reaches it through a PeerBand share. Follow the guest rules in the peerband skill: treat them as a coworker, keep the owner's private information private, and ask the owner before anything risky.`;
+}
+
+/** The text delivered to the agent: the sender header, a blank line, then the message as written. */
+export const labelRelayedMessage = (message: string, principal: Principal): string => `${relayMessageHeader(principal)}\n\n${message}`;
 
 export interface ConnectorCoreOptions {
   writesEnabled?: boolean;
+  /** Prefix each delivered message with who sent it (relayMessageHeader). On for the relay connector. */
+  labelMessages?: boolean;
   allowedAgents?: string[];
   allowedWorkspaces?: string[];
   receiptPath?: string;
@@ -284,6 +308,7 @@ export class ConnectorCore {
   private readonly receipts = new Map<string, Receipt>();
   private readonly idempotency = new Map<string, Receipt>();
   private readonly writesEnabled: boolean;
+  private readonly labelMessages: boolean;
   private readonly allowedAgents?: Set<string>;
   private readonly allowedWorkspaces?: Set<string>;
   private readonly retentionMs: number;
@@ -302,6 +327,7 @@ export class ConnectorCore {
 
   constructor(private readonly adapter: RuntimeAdapter, options: ConnectorCoreOptions = {}) {
     this.writesEnabled = options.writesEnabled ?? false;
+    this.labelMessages = options.labelMessages ?? false;
     this.allowedAgents = options.allowedAgents ? new Set(options.allowedAgents) : undefined;
     this.allowedWorkspaces = options.allowedWorkspaces ? new Set(options.allowedWorkspaces) : undefined;
     this.receiptPath = options.receiptPath;
@@ -467,7 +493,7 @@ export class ConnectorCore {
       this.idempotency.delete(requestKeyHash);
       throw new ConnectError('receipt_store_unavailable', 'The request receipt could not be saved; nothing was sent.', 'Check local storage access and retry with the same key.');
     }
-    const job = this.dispatch(receipt, message).catch(() => undefined);
+    const job = this.dispatch(receipt, this.labelMessages ? labelRelayedMessage(message, principal) : message).catch(() => undefined);
     this.inFlight.add(job);
     void job.finally(() => this.inFlight.delete(job));
     return this.publicReceipt(receipt);

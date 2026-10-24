@@ -1,28 +1,36 @@
 import { symbols } from '../output.js';
 import { askYesNo, PromptAborted } from '../prompt.js';
 import { CliError, type Ctx } from '../types.js';
-import { installSpec } from './herdr.js';
+import { installPlugin, installSpec } from './herdr.js';
 import { checkHerdrPlugin, fixCommand, REPAIR_COMMAND } from './herdr-check.js';
 
 export type HerdrPluginMode = 'ask' | 'install' | 'skip';
 export const HERDR_PLUGIN_MODES: readonly HerdrPluginMode[] = ['ask', 'install', 'skip'];
 
-/** After a successful login: detect Herdr and the PeerBand plugin, and guide (or perform) the next step. Never fails login. */
-export async function herdrSetup(ctx: Ctx, mode: HerdrPluginMode): Promise<void> {
+/** What the plugin step left behind: Herdr missing, the plugin ready for the relay, or still missing/broken. */
+export type HerdrSetupResult = 'no-herdr' | 'ready' | 'not-ready';
+
+/**
+ * After a successful login: detect Herdr and the PeerBand plugin, and guide (or perform) the next step. Never fails
+ * login. `relayNext: false` leaves out the "then peerband relay" hints, for `peerband setup`, which opens the relay itself.
+ */
+export async function herdrSetup(ctx: Ctx, mode: HerdrPluginMode, options: { relayNext?: boolean } = {}): Promise<HerdrSetupResult> {
   const s = ctx.out.stdout;
-  const manual = `${s.dim('Next:')} peerband herdr install  ${s.dim('then')}  peerband relay`;
+  const relayNext = options.relayNext ?? true;
+  const then = relayNext ? `  ${s.dim('then')}  peerband relay` : '';
+  const manual = `${s.dim('Next:')} peerband herdr install${then}`;
   const state = await checkHerdrPlugin(ctx);
 
   if (!state.found) {
     ctx.out.print('');
     ctx.out.print(`${s.yellow(symbols.warn)} Herdr was not found. The PeerBand Relay tab needs Herdr 0.9.3 or newer.`);
     ctx.out.print('  1. Install Herdr: https://herdr.dev');
-    ctx.out.print(`  2. ${s.bold('peerband herdr install')}  ${s.dim('then')}  ${s.bold('peerband relay')}`);
-    return;
+    ctx.out.print(`  2. ${s.bold('peerband herdr install')}  ${s.dim('then')}  ${s.bold(relayNext ? 'peerband relay' : 'peerband setup')}`);
+    return 'no-herdr';
   }
   if (state.installed && state.problems.length === 0) {
-    ctx.out.print(`${s.dim('Next:')} peerband relay  ${s.dim('(opens the PeerBand Relay tab in Herdr)')}`);
-    return;
+    if (relayNext) ctx.out.print(`${s.dim('Next:')} peerband relay  ${s.dim('(opens the PeerBand Relay tab in Herdr)')}`);
+    return 'ready';
   }
   const repair = state.installed;
   if (repair) {
@@ -38,26 +46,28 @@ export async function herdrSetup(ctx: Ctx, mode: HerdrPluginMode): Promise<void>
     } catch (error) {
       if (!(error instanceof PromptAborted)) throw error;
       ctx.out.print(manual);
-      return;
+      return 'not-ready';
     }
     if (!install) {
       ctx.out.print(s.dim(`Skipped. ${repair ? 'Repair' : 'Add'} it later with \`${REPAIR_COMMAND}\`, then open the relay with \`peerband relay\`.`));
-      return;
+      return 'not-ready';
     }
   }
   if (!install) {
     ctx.out.print(manual);
-    return;
+    return 'not-ready';
   }
 
   try {
-    await installSpec.run({ values: {}, positionals: [] }, ctx);
+    await installPlugin(ctx, { relayNext });
   } catch (error) {
     const message = (error as Error).message;
     ctx.out.warn(`${s.yellow(symbols.warn)} Could not ${repair ? 'repair' : 'add'} the PeerBand plugin${repair ? '' : ' to Herdr'}: ${message}`);
     if (error instanceof CliError && error.hint) ctx.out.warn(`  ${error.hint}`);
     ctx.out.print(s.dim(`You are logged in. ${repair ? 'Repair' : 'Add'} the plugin later with \`peerband herdr install\`, then run \`peerband relay\`.`));
+    return 'not-ready';
   }
+  return 'ready';
 }
 
 /**

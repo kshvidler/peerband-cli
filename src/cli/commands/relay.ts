@@ -1,7 +1,7 @@
 import { openRelayTab } from '../herdr-js.js';
 import { NOT_FOUND_HINT } from '../herdr-bin.js';
 import { sanitize, symbols } from '../output.js';
-import { CliError, type CommandSpec } from '../types.js';
+import { CliError, type CommandSpec, type Ctx } from '../types.js';
 import { ensureHerdrPlugin } from './herdr-setup.js';
 import { printMcpHint, printSkillTip, requireCredentials } from './shared.js';
 
@@ -16,16 +16,7 @@ export const spec: CommandSpec = {
   async run(_parsed, ctx) {
     const credentials = await requireCredentials(ctx);
     await ensureHerdrPlugin(ctx);
-    try {
-      await (ctx.openRelayTab ?? openRelayTab)();
-    } catch (error) {
-      const message = sanitize((error as Error).message || 'Could not open the PeerBand Relay tab.');
-      let hint = 'Make sure Herdr is running, then try `peerband relay` again.';
-      if (/was not found/i.test(message)) hint = NOT_FOUND_HINT;
-      else if (/not installed/i.test(message)) hint = 'Run `peerband herdr install`, then `peerband relay`.';
-      else if (/already in progress/i.test(message)) hint = 'Wait a moment and run `peerband relay` again.';
-      throw new CliError(message, hint);
-    }
+    await openRelay(ctx);
     const s = ctx.out.stdout;
     ctx.out.print(`${s.green(symbols.ok)} PeerBand Relay is open in Herdr.`);
     printMcpHint(ctx, credentials.serverUrl);
@@ -33,3 +24,17 @@ export const spec: CommandSpec = {
     return 0;
   },
 };
+
+/** Opens (or focuses) the Relay tab; a failure is a CliError with the next step. */
+export async function openRelay(ctx: Ctx): Promise<void> {
+  try {
+    await (ctx.openRelayTab ?? openRelayTab)();
+  } catch (error) {
+    const message = sanitize((error as Error).message || 'Could not open the PeerBand Relay tab.');
+    let hint = 'Make sure Herdr is running, then try `peerband relay` again.';
+    if (/was not found/i.test(message)) hint = NOT_FOUND_HINT;
+    else if (/not installed/i.test(message)) hint = 'Run `peerband herdr install`, then `peerband relay`.';
+    else if (/already in progress/i.test(message)) hint = 'Wait a moment and run `peerband relay` again.';
+    throw new CliError(message, hint);
+  }
+}

@@ -1,6 +1,6 @@
 {
   "name": "peerband",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "PeerBand CLI and Herdr plugin: reach your local coding agents from any MCP client through your PeerBand account",
   "license": "Apache-2.0",
   "type": "module",
@@ -10,7 +10,7 @@
   "keywords": ["peerband", "herdr", "mcp", "coding-agents", "cli"],
   "bin": { "peerband": "dist/peerband.mjs" },
   "engines": { "node": ">=22.13.0" },
-  "files": ["dist/", "herdr/", "herdr-plugin.toml", "protocol/", "install/", "README.md", "LICENSE", "NOTICE", "SECURITY.md"],
+  "files": ["dist/", "herdr/", "herdr-plugin.toml", "protocol/", "install/", "skills/", "README.md", "LICENSE", "NOTICE", "SECURITY.md"],
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",

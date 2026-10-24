@@ -1,7 +1,7 @@
 #!/bin/sh
 # PeerBand installer.
 #   curl -fsSL https://peerband.com/install.sh | sh
-#       Installs the CLI, then runs the interactive `peerband login` (opens your browser).
+#       Installs the CLI, then runs the interactive `peerband setup` (browser login, Herdr plugin, agent skill, relay).
 #   curl -fsSL https://peerband.com/install.sh | sh -s -- --grant GRANT --name NAME
 #       Headless/CI only: enroll with a dashboard grant instead of the browser.
 # Env: PEERBAND_GRANT, PEERBAND_NAME, PEERBAND_VERSION (default latest),
@@ -24,7 +24,8 @@ PeerBand installer
 
 Usage: install.sh [--name NAME] [--grant GRANT]
 
-By default the installer runs "peerband login", which opens your browser to sign in.
+By default the installer runs "peerband setup": it opens your browser to sign in, adds the
+PeerBand plugin to Herdr, offers the PeerBand skill for your coding agents and opens the relay.
 
   --name NAME     machine name shown in the dashboard (default: hostname)
   --grant GRANT   headless/CI only: short-lived enrollment grant from the PeerBand dashboard,
@@ -76,29 +77,29 @@ elif [ "$onpath" != "$pb" ]; then
 fi
 ok "peerband installed"
 
-step "Logging in"
+step "Setting up"
 if [ -n "$grant" ]; then
   if [ -n "$name" ]; then
-    PEERBAND_GRANT=$grant "$pb" login --herdr-plugin install --name "$name" || die "peerband login failed. Get a fresh grant from your PeerBand dashboard."
+    PEERBAND_GRANT=$grant "$pb" setup --herdr-plugin install --skill install --name "$name" || die "peerband setup failed. Get a fresh grant from your PeerBand dashboard."
   else
-    PEERBAND_GRANT=$grant "$pb" login --herdr-plugin install || die "peerband login failed. Get a fresh grant from your PeerBand dashboard."
+    PEERBAND_GRANT=$grant "$pb" setup --herdr-plugin install --skill install || die "peerband setup failed. Get a fresh grant from your PeerBand dashboard."
   fi
 else
   # Browser sign-in. Under `curl | sh` stdin is the script itself; use the terminal instead.
   set -- --herdr-plugin install
   [ -z "$name" ] || set -- "$@" --name "$name"
   if (exec </dev/tty) 2>/dev/null; then
-    "$pb" login "$@" </dev/tty
+    "$pb" setup "$@" </dev/tty
   else
-    "$pb" login "$@"
-  fi || die "peerband login failed. Run 'peerband login' again, or on a headless machine use 'peerband login --grant GRANT' with a grant from your PeerBand dashboard."
+    "$pb" setup "$@"
+  fi || die "peerband setup failed. Run 'peerband setup' again, or on a headless machine use 'peerband setup --grant GRANT' with a grant from your PeerBand dashboard."
 fi
 grant=''
 
-# `peerband login --herdr-plugin install` has already added the plugin to Herdr when Herdr is present.
+# `peerband setup` has already added the plugin, offered the skill and opened the relay when Herdr is present.
 if command -v herdr >/dev/null 2>&1; then
-  printf '\n%sPeerBand is ready.%s Next:\n  peerband relay    open the PeerBand Relay tab in Herdr\n  peerband status   check your connection (and the Herdr plugin)\n' "$G" "$N"
+  printf '\n%sPeerBand is installed.%s Check it any time with: peerband status\n' "$G" "$N"
 else
   warn "Herdr was not found. PeerBand reaches the agents you run in Herdr."
-  printf '\n%sPeerBand is installed and logged in.%s Next:\n  1. Install Herdr 0.9.3 or newer: https://herdr.dev\n  2. peerband herdr install   then   peerband relay\n  peerband status   check your connection\n' "$G" "$N"
+  printf '\n%sPeerBand is installed and logged in.%s Next:\n  1. Install Herdr 0.9.3 or newer: https://herdr.dev\n  2. peerband setup   adds the Herdr plugin and opens the relay\n  peerband status   check your connection\n' "$G" "$N"
 fi

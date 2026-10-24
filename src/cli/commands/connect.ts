@@ -144,6 +144,7 @@ export async function connect(options: ConnectOptions, ctx: Ctx): Promise<number
   const adapter: RuntimeAdapter = runtime === 'mock' ? new MockRuntime() : new HerdrAdapter(config.herdr ?? {});
   const core = new ConnectorCore(adapter, {
     writesEnabled: enableWrites,
+    labelMessages: true,
     allowedAgents: config.allowedAgents,
     allowedWorkspaces: config.allowedWorkspaces,
     receiptPath: config.stateDirectory ? resolve(config.stateDirectory, 'receipts.json') : receiptsPath({ env: ctx.env }),

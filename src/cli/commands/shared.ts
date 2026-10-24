@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
 import { ConfigError, connectorConfigPath, credentialsPath, loadConnectorConfig, loadCredentials, mcpUrlFor, type ConnectorConfig, type Credentials } from '../../core/index.js';
+import { skillInstalled } from '../skill.js';
 import { CliError, EXIT_NOT_LOGGED_IN, type Ctx } from '../types.js';
 
 export const credentialsFile = (ctx: Ctx): string => credentialsPath({ env: ctx.env });
@@ -32,10 +33,11 @@ export function writesEnabled(config: ConnectorConfig, flags: { readOnly?: boole
   return config.enableWrites !== false;
 }
 
-export const SKILL_COMMAND = 'npx skills add kshvidler/peerband-cli';
+export const SKILL_COMMAND = 'peerband skill';
 
-/** One-time suggestion at the end of a successful setup. */
+/** Suggestion at the end of login and relay, until the skill is installed. */
 export function printSkillTip(ctx: Ctx): void {
+  if (skillInstalled(ctx)) return;
   ctx.out.print(ctx.out.stdout.dim(`Give your coding agents the PeerBand skill: ${SKILL_COMMAND}`));
 }
 

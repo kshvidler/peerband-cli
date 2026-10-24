@@ -223,7 +223,7 @@ describe('peerband login: plugin repair', () => {
 });
 
 describe('skill tip', () => {
-  const tip = 'Give your coding agents the PeerBand skill: npx skills add kshvidler/peerband-cli';
+  const tip = 'Give your coding agents the PeerBand skill: peerband skill';
 
   it('is printed at the end of login and after a successful relay, but not when relay fails', async () => {
     const granted = { installation_id: 'inst-1', credential: 'c', machine_name: 'work-box' };

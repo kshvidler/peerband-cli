@@ -1,7 +1,7 @@
 # PeerBand installer for Windows PowerShell 5.1 and PowerShell 7+.
 #
 #   irm https://peerband.com/install.ps1 | iex
-#       Installs the CLI, then runs the interactive `peerband login` (opens your browser).
+#       Installs the CLI, then runs the interactive `peerband setup` (browser login, Herdr plugin, agent skill, relay).
 #       Headless/CI only: use a dashboard grant instead of the browser, e.g.
 #       $env:PEERBAND_GRANT = 'GRANT'; $env:PEERBAND_NAME = 'my-pc'; irm https://peerband.com/install.ps1 | iex
 #
@@ -44,7 +44,8 @@ PeerBand installer
 
 Usage: install.ps1 [-Name NAME] [-Grant GRANT]
 
-By default the installer runs "peerband login", which opens your browser to sign in.
+By default the installer runs "peerband setup": it opens your browser to sign in, adds the
+PeerBand plugin to Herdr, offers the PeerBand skill for your coding agents and opens the relay.
 
   -Name NAME     machine name shown in the dashboard (default: hostname)
   -Grant GRANT   headless/CI only: short-lived enrollment grant from the PeerBand dashboard,
@@ -89,8 +90,10 @@ if (-not $pbOnPath) {
 }
 Say '  ok peerband installed' Green
 
-Say '==> Logging in' Cyan
-$loginArgs = @('login', '--herdr-plugin', 'install')
+Say '==> Setting up' Cyan
+$loginArgs = @('setup', '--herdr-plugin', 'install')
+# Headless (grant) setup cannot ask, so it installs the agent skill; a browser setup asks first (Yes by default).
+if ($pbGrant) { $loginArgs += @('--skill', 'install') }
 if ($pbName) { $loginArgs += @('--name', $pbName) }
 try {
     if ($pbGrant) { $env:PEERBAND_GRANT = $pbGrant }
@@ -100,19 +103,17 @@ try {
     $env:PEERBAND_GRANT = $null
     $pbGrant = $null
 }
-if ($loginCode -ne 0) { Fail "peerband login failed. Run 'peerband login' again, or on a headless machine use 'peerband login --grant GRANT' with a grant from your PeerBand dashboard." }
+if ($loginCode -ne 0) { Fail "peerband setup failed. Run 'peerband setup' again, or on a headless machine use 'peerband setup --grant GRANT' with a grant from your PeerBand dashboard." }
 
-# `peerband login --herdr-plugin install` has already added the plugin to Herdr when Herdr is present.
+# `peerband setup` has already added the plugin, offered the skill and opened the relay when Herdr is present.
 $pbHasHerdr = [bool](Get-Command herdr -ErrorAction SilentlyContinue)
 
 Say ''
 if ($pbHasHerdr) {
-    Say 'PeerBand is ready. Next:' Green
-    Say '  peerband relay    open the PeerBand Relay tab in Herdr'
-    Say '  peerband status   check your connection (and the Herdr plugin)'
+    Say 'PeerBand is installed. Check it any time with: peerband status' Green
 } else {
     Say 'PeerBand is installed and logged in. Next:' Green
     Say '  1. Install Herdr 0.9.3 or newer: https://herdr.dev'
-    Say '  2. peerband herdr install   then   peerband relay'
+    Say '  2. peerband setup   adds the Herdr plugin and opens the relay'
     Say '  peerband status   check your connection'
 }
