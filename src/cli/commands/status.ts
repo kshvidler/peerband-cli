@@ -1,5 +1,5 @@
 import { configHome, loadCredentials, mcpUrlFor, type Credentials } from '../../core/index.js';
-import { checkHerdrPlugin, REPAIR_COMMAND, type PluginProblem } from './herdr-check.js';
+import { checkHerdrPlugin, fixCommand, REPAIR_COMMAND, type PluginProblem } from './herdr-check.js';
 import { paneLabel } from '../herdr-js.js';
 import { flag } from '../args.js';
 import { relaySnapshot, type RelaySnapshot } from '../control.js';
@@ -132,7 +132,7 @@ function renderHuman(report: StatusReport, ctx: Ctx): void {
       !report.herdr.pluginInstalled
         ? `${s.yellow(symbols.warn)} not installed ${s.dim(`(run \`${REPAIR_COMMAND}\`)`)}`
         : first
-          ? `${s.yellow(symbols.warn)} ${first.message} ${s.dim(`(run \`${REPAIR_COMMAND}\`)`)}`
+          ? `${s.yellow(symbols.warn)} ${first.message} ${s.dim(`(run \`${fixCommand(first)}\`)`)}`
           : `${s.green(symbols.ok)} ${report.herdr.pluginSource ?? 'installed'}`,
     ]);
   }

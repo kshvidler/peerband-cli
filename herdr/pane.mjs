@@ -33,12 +33,18 @@ let busyError = false;
 let snapshot = { state: "stopping", connectionState: "disabled", activity: [] };
 let errorText = "";
 let timer;
+let reconnectTimer;
 let control;
 let controlBuffer = "";
 const replies = [];
 let ownsUi = false;
-let controlClosed;
-const closed = new Promise((resolve) => { controlClosed = resolve; });
+// Resolves when the current control socket has closed (replaced for every new socket).
+let closed = Promise.resolve();
+// While the helper is gone, the pane keeps trying to re-attach (without starting a helper itself), so a relay started
+// another way (the plugin's Start action, `peerband relay`) is picked up and the tab label follows the real state.
+const RECONNECT_MS = 2000;
+const UNAVAILABLE = "Relay helper is not running. Press Space to start it, or run `peerband relay`.";
+
 function draw() {
   if (closing || !stdout.isTTY) return;
   stdout.write("\x1b[2J\x1b[H" + renderPane({ snapshot, identity, email, messages, error: errorText, columns: stdout.columns, rows: stdout.rows }));
@@ -47,8 +53,15 @@ async function runLifecycle(command) {
   const { stdout: result } = await exec(process.execPath, [lifecycle, command], { timeout: 5000, windowsHide: true, maxBuffer: 65_536 });
   return JSON.parse(result.trim());
 }
+const controlAlive = () => Boolean(control && !control.destroyed);
+function showUnavailable(message = UNAVAILABLE) {
+  snapshot = { state: "stopping", connectionState: "helper-unavailable", activity: snapshot?.activity ?? [] };
+  errorText = message;
+  void syncRelayTab(false).catch(() => {});
+}
 async function refresh() {
   if (closing || pending || refreshInFlight) return;
+  if (!controlAlive()) { scheduleReconnect(); return; }
   refreshInFlight = true;
   const generation = refreshGeneration;
   try {
@@ -56,8 +69,7 @@ async function refresh() {
     if (generation === refreshGeneration) { snapshot = next; if (!busyError) errorText = ""; void syncRelayTab(next.state === "running").catch(() => {}); }
   } catch {
     if (generation !== refreshGeneration) return;
-    snapshot = { state: "stopping", connectionState: "helper-unavailable", activity: [] };
-    errorText = "Helper control channel unavailable. Reopen peerband relay to reconnect.";
+    showUnavailable();
   } finally { refreshInFlight = false; }
   draw();
 }
@@ -70,6 +82,11 @@ async function toggle() {
   closeArmed = false;
   draw();
   try {
+    if (!controlAlive()) {
+      // No helper: Space starts one, like opening the tab does.
+      await attach({ start: true });
+      return;
+    }
     const next = await sendUi(snapshot?.state === "running" ? "ui-disable" : "ui-enable");
     if (next.error === "busy") throw new Error("The relay is still stopping. Try On again in a moment.");
     snapshot = next;
@@ -86,6 +103,7 @@ async function close() {
   if (closing) return;
   closing = true;
   clearInterval(timer);
+  clearTimeout(reconnectTimer);
   stopInput();
   process.stdin.off("end", onInputEnd);
   process.stdin.off("close", onInputEnd);
@@ -93,7 +111,7 @@ async function close() {
   process.off("SIGTERM", onSignal);
   process.off("SIGHUP", onSignal);
   stdout.write("\x1b[2J\x1b[HDisconnecting PeerBand relay…\n");
-  if (ownsUi) {
+  if (ownsUi && controlAlive()) {
     try { await sendUi("ui-close"); } catch { /* socket closure also owns final cleanup */ }
     control?.end();
   } else control?.destroy();
@@ -113,6 +131,83 @@ const stopInput = startPaneInput({ boxRows: controlBoxRows(email), onToggle: tog
   errorText = "Closing disconnects the relay. Press q again to close; reopen with `peerband relay`.";
   draw();
 } });
+
+function wireControl(socket) {
+  let resolveClosed;
+  closed = new Promise((resolve) => { resolveClosed = resolve; });
+  controlBuffer = "";
+  socket.on("data", (chunk) => {
+    if (control !== socket) return;
+    controlBuffer += chunk.toString();
+    if (controlBuffer.length > 65_536) { failControl(new Error("Invalid relay control response")); return; }
+    let newline;
+    while ((newline = controlBuffer.indexOf("\n")) >= 0) {
+      const line = controlBuffer.slice(0, newline);
+      controlBuffer = controlBuffer.slice(newline + 1);
+      let value;
+      try { value = JSON.parse(line); } catch { failControl(new Error("Invalid relay control response")); return; }
+      const request = replies.shift();
+      if (request) { clearTimeout(request.timer); request.resolve(value); }
+    }
+  });
+  let lost = false;
+  const onLost = (message) => {
+    if (lost) return;
+    lost = true;
+    resolveClosed();
+    if (control !== socket) return;
+    rejectReplies(new Error(message));
+    if (closing) return;
+    ownsUi = false;
+    showUnavailable(errorText || UNAVAILABLE);
+    draw();
+    scheduleReconnect();
+  };
+  socket.on("close", () => onLost("Relay owner channel closed"));
+  socket.on("error", () => onLost("Relay owner channel failed"));
+}
+
+// Connects to the helper and takes UI ownership. `start`: start a helper if none answers and turn the relay on.
+async function attach({ start }) {
+  let socket;
+  try { socket = await connectControl(); }
+  catch (error) {
+    if (!start) throw error;
+    await runLifecycle("start-ui");
+    socket = await connectControl();
+  }
+  if (closing) { socket.destroy(); return; }
+  control = socket;
+  wireControl(socket);
+  const attached = await sendUi("attach-ui");
+  if (attached.error === "ui-owned") throw new Error("Another relay pane already owns this installation. Close it before reopening.");
+  ownsUi = true;
+  snapshot = start ? await sendUi("ui-enable") : attached;
+  errorText = "";
+  void syncRelayTab(snapshot.state === "running").catch(() => {});
+  draw();
+  if (!timer) {
+    timer = setInterval(refresh, 1000);
+    timer.unref();
+  }
+}
+
+// `start` (used once, after the first attempt failed, e.g. a slow first start right after an update) may start a
+// helper; later retries only re-attach to one that something else started.
+function scheduleReconnect(start = false) {
+  if (closing || reconnectTimer || controlAlive()) return;
+  reconnectTimer = setTimeout(async () => {
+    reconnectTimer = undefined;
+    if (closing || controlAlive() || pending) { if (!controlAlive()) scheduleReconnect(); return; }
+    try { await attach({ start }); }
+    catch (error) {
+      if (control && !control.destroyed) control.destroy();
+      if (/already owns/.test(error.message || "")) { errorText = error.message; draw(); }
+      scheduleReconnect();
+    }
+  }, RECONNECT_MS);
+}
+
 if (stdinIsInteractive()) {
   process.stdin.once("end", onInputEnd);
   process.stdin.once("close", onInputEnd);
@@ -124,46 +219,14 @@ if (!stdinIsInteractive()) {
   console.log(renderPane({ snapshot, identity, email, messages, error: "Interactive terminal controls are required in this pane." }));
 } else {
   try {
-    try { control = await connectControl(); }
-    catch {
-      await runLifecycle("start-ui");
-      control = await connectControl();
-    }
-    if (closing) { control.destroy(); }
-    else {
-      control.on("data", (chunk) => {
-      controlBuffer += chunk.toString();
-      if (controlBuffer.length > 65_536) { failControl(new Error("Invalid relay control response")); return; }
-      let newline;
-      while ((newline = controlBuffer.indexOf("\n")) >= 0) {
-        const line = controlBuffer.slice(0, newline);
-        controlBuffer = controlBuffer.slice(newline + 1);
-        let value;
-        try { value = JSON.parse(line); } catch { failControl(new Error("Invalid relay control response")); return; }
-        const request = replies.shift();
-        if (request) { clearTimeout(request.timer); request.resolve(value); }
-      }
-    });
-      control.on("close", () => { controlClosed(); rejectReplies(new Error("Relay owner channel closed")); });
-      control.on("error", () => { controlClosed(); rejectReplies(new Error("Relay owner channel failed")); });
-      const attached = await sendUi("attach-ui");
-      if (attached.error === "ui-owned") throw new Error("Another relay pane already owns this installation. Close it before reopening.");
-      ownsUi = true;
-      snapshot = attached;
-      const enabled = await sendUi("ui-enable");
-      snapshot = enabled;
-      void syncRelayTab(enabled.state === "running").catch(() => {});
-      draw();
-      await refresh();
-      timer = setInterval(refresh, 1000);
-      timer.unref();
-    }
+    await attach({ start: true });
+    await refresh();
   } catch (error) {
     if (!closing) {
-      errorText = error.message;
-      snapshot = { state: "stopping", connectionState: "helper-unavailable", activity: [] };
+      if (control && !control.destroyed) control.destroy();
+      showUnavailable(error.message);
       draw();
-      if (control) control.destroy();
+      scheduleReconnect(!/already owns/.test(error.message || ""));
     }
   }
 }

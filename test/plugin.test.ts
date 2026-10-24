@@ -3,7 +3,7 @@ import { promisify } from "node:util";
 import { access, copyFile, mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { createConnection, createServer as createNetServer } from "node:net";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // @ts-expect-error plain JS module without declarations
@@ -93,6 +93,43 @@ describe("lifecycle supervisor", () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+
+  it("reclaims a helper lock left by a dead helper (new and legacy format) instead of refusing to start", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "peerband-stale-helper-"));
+    const config = join(directory, "peerband");
+    const lock = join(config, "relay-helper.lock");
+    const env = {
+      ...process.env,
+      PEERBAND_CONFIG_HOME: config,
+      PEERBAND_RUNTIME: "mock",
+      PEERBAND_CONNECTOR_CONFIG: join(directory, "connector.json"),
+      PEERBAND_CONNECTOR_ENTRY: fakeConnector,
+    };
+    const command = (action: string) =>
+      execute(process.execPath, [join(root, "herdr", "lifecycle.mjs"), action], { env, timeout: 15_000, windowsHide: true });
+    const lockGone = async () => { try { await access(lock); return false; } catch { return true; } };
+    const dead = spawnSync(process.execPath, ["-e", ""], { windowsHide: true }).pid!;
+    const owners: Array<[string, Record<string, unknown>]> = [["start", { token: "old", pid: dead, hostname: hostname() }], ["start-ui", { token: "legacy" }]];
+    try {
+      for (const [action, owner] of owners) {
+        await mkdir(lock, { recursive: true });
+        await writeFile(join(lock, "owner.json"), JSON.stringify(owner));
+        await writeFile(join(config, "relay-state.json"), JSON.stringify({ state: "running", connectionState: "connected", activity: [] }));
+        const started = await command(action);
+        expect(started.stderr).toMatch(/Reclaimed a stale lock/);
+        const record = JSON.parse(await readFile(join(lock, "owner.json"), "utf8")) as { token: string; pid: number; hostname: string };
+        expect(record.token).not.toBe(owner.token);
+        expect(record.pid).toBeGreaterThan(0);
+        expect(record.hostname).toBe(hostname());
+        expect(JSON.parse((await command("stop")).stdout).state).toBe("stopping");
+        await eventually(lockGone);
+      }
+    } finally {
+      await command("stop").catch(() => {});
+      await pause(200);
+      await rm(directory, { recursive: true, force: true }).catch(() => {});
+    }
+  }, 60_000);
 
   it("supervises the connector child over IPC and releases ownership on graceful stop", async () => {
     const directory = await mkdtemp(join(tmpdir(), "peerband-helper-"));

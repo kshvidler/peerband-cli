@@ -14,7 +14,9 @@ PeerBand lets an MCP client (Claude, ChatGPT, Claude Code, any client with remot
 3. `peerband relay` - opens the PeerBand Relay tab in Herdr and connects the machine.
 4. Add the MCP server `https://mcp.peerband.com/mcp` to the client: a custom connector in Claude or ChatGPT, or in Claude Code `claude mcp add --transport http peerband https://mcp.peerband.com/mcp`. Sign in and approve access.
 
-Other commands: `peerband status` (login, relay, plugin health, installation ID), `peerband connect` (run the connector in the foreground; `--read-only` blocks messages), `peerband herdr install` (install or repair the plugin), `peerband share` (invite another PeerBand user to this machine; `share list`, `share revoke ID`), `peerband logout`.
+To update later: `peerband update` (updates the CLI from npm, then the Herdr plugin, and restarts the relay; `--check` only reports). If `peerband status` says the plugin version does not match the CLI, run `peerband update`.
+
+Other commands: `peerband status` (login, relay, plugin health, installation ID), `peerband connect` (run the connector in the foreground; `--read-only` blocks messages), `peerband update` (update the CLI and the plugin), `peerband herdr install` (install or repair the plugin), `peerband share` (invite another PeerBand user to this machine; `share list`, `share revoke ID`), `peerband logout`.
 
 ## MCP tools
 

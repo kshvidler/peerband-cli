@@ -7,6 +7,10 @@ import type { Ctx } from '../types.js';
 
 const PLUGIN_ID = 'peerband';
 export const REPAIR_COMMAND = 'peerband herdr install';
+export const UPDATE_COMMAND = 'peerband update';
+
+/** The command that fixes a problem: a version mismatch is fixed by updating, everything else by reinstalling. */
+export const fixCommand = (problem: PluginProblem | undefined): string => (problem?.code === 'version-mismatch' ? UPDATE_COMMAND : REPAIR_COMMAND);
 
 export type PluginProblemCode = 'not-installed' | 'local-source' | 'version-mismatch' | 'config-home' | 'node-path';
 

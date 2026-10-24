@@ -49,6 +49,7 @@ export function rootHelp(s: Style, version: string): string {
       '2. peerband herdr install   Add the plugin to Herdr',
       '3. peerband relay           Open the relay tab and connect',
     ]),
+    ...section(s, 'Updating', ['peerband update            Update the CLI and the Herdr plugin together (--check to only look)']),
     ...section(s, 'Exit codes', ['0 ok   1 failure   2 usage error   3 not logged in   130 interrupted']),
     '',
     `Run ${s.cyan('peerband <command> --help')} for details. Docs: https://peerband.com`,

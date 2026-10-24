@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { normalizePaneEvent, createPaneSnapshot, fallbackPaneSnapshot } from "./pane-state.mjs";
 import { config, lock, recordPath, channel, connectControl, matches } from "./control.mjs";
 import { relayStatePath } from "./paths.mjs";
+import { ownerIdentity, reclaimIfStale, resetRelayState, SUPERVISOR_PATTERN } from "./stale-lock.mjs";
 
 const script = fileURLToPath(import.meta.url);
 const pluginRoot = resolve(dirname(script), "..");
@@ -218,7 +219,7 @@ async function supervise() {
     server.once("error", reject);
     server.listen(channel, resolve);
   });
-  await writeFile(recordPath, JSON.stringify({ token }), {
+  await writeFile(recordPath, JSON.stringify({ token, ...ownerIdentity() }), {
     mode: 0o600,
     flag: "wx",
   });
@@ -232,6 +233,61 @@ async function supervise() {
 async function assertConnectorEntry() {
   try { await access(connectorEntry); }
   catch { throw new Error(`PeerBand connector not found at ${connectorEntry}. Reinstall the plugin with \`peerband herdr install\` (a source checkout needs \`npm run build\` first).`); }
+}
+
+function lockError(verdict) {
+  return new Error(
+    `Another PeerBand helper still holds the relay lock (${verdict.reason}). ` +
+    "Stop it with `peerband herdr install` (restarts the relay cleanly) or end that process, then try again.",
+  );
+}
+
+// Removes the helper lock when its owner is provably gone (dead pid, or a legacy lock nobody answers for).
+async function reclaimStaleHelperLock() {
+  const result = await reclaimIfStale({
+    lockDir: lock,
+    ownerFile: recordPath,
+    channel,
+    processPattern: SUPERVISOR_PATTERN,
+    log: (message) => console.error(`peerband: ${message}`),
+  });
+  if (result.reclaimed) await resetRelayState(paneStatePath).catch(() => {});
+  return result;
+}
+
+// Takes the helper lock for `start`. Returns false when a running helper already answered (its status is printed).
+async function acquireForStart() {
+  for (let round = 0; round < 3; round++) {
+    try {
+      await mkdir(lock, { mode: 0o700 });
+      return true;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+    }
+    let existing = null;
+    try { existing = await request("status"); } catch { /* not answering */ }
+    if (existing && existing.state === "running") {
+      console.log(JSON.stringify(existing));
+      return false;
+    }
+    if (existing && existing.state === "stopping") {
+      for (let attempt = 0; attempt < 50; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        try {
+          const current = await request("status");
+          if (current.state === "running") {
+            console.log(JSON.stringify(current));
+            return false;
+          }
+        } catch { break; }
+      }
+      continue;
+    }
+    if (existing) throw new Error("Existing helper is still changing state.");
+    const { reclaimed, verdict } = await reclaimStaleHelperLock();
+    if (!reclaimed && verdict.state !== "absent") throw lockError(verdict);
+  }
+  throw new Error("Existing helper could not be safely restarted.");
 }
 
 async function main() {
@@ -248,12 +304,8 @@ async function main() {
       console.log(JSON.stringify(existing));
       return;
     } catch {
-      try {
-        await access(lock);
-        throw new Error("Existing helper lock could not be verified. Inspect the helper before manually clearing a stale lock.");
-      } catch (error) {
-        if (error.code !== "ENOENT") throw error;
-      }
+      const { reclaimed, verdict } = await reclaimStaleHelperLock();
+      if (!reclaimed && verdict.state !== "absent") throw lockError(verdict);
     }
     await mkdir(lock, { mode: 0o700 });
     const supervisor = spawn(process.execPath, [script, "supervise", "--await-ui"], {
@@ -269,34 +321,7 @@ async function main() {
   if (command === "start" || command === "enable") {
     await assertConnectorEntry();
     await mkdir(config, { recursive: true, mode: 0o700 });
-    try {
-      await mkdir(lock, { mode: 0o700 });
-    } catch (error) {
-      if (error.code !== "EEXIST") throw error;
-      try {
-        const existing = await request("status");
-        if (existing.state === "running") {
-          console.log(JSON.stringify(existing));
-          return;
-        }
-        if (existing.state === "stopping") {
-          for (let attempt = 0; attempt < 50; attempt++) {
-            await new Promise((resolve) => setTimeout(resolve, 100));
-            try {
-              const current = await request("status");
-              if (current.state === "running") {
-                console.log(JSON.stringify(current));
-                return;
-              }
-            } catch { break; }
-          }
-          await mkdir(lock, { mode: 0o700 });
-        } else throw new Error("Existing helper is still changing state.");
-      } catch {
-        try { await access(lock); } catch { throw new Error("Existing helper could not be safely restarted."); }
-        throw new Error("Existing helper lock could not be verified. Inspect the helper before manually clearing a stale lock.");
-      }
-    }
+    if (!(await acquireForStart())) return;
     const supervisor = spawn(process.execPath, [script, "supervise"], {
       cwd: config,
       detached: true,
