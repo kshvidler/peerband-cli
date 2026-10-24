@@ -16,15 +16,33 @@ const pluginRoot = resolve(dirname(script), "..");
 const connectorEntry = process.env.PEERBAND_CONNECTOR_ENTRY || join(pluginRoot, "dist", "peerband.mjs");
 const paneStatePath = relayStatePath(config);
 
+// Starting Node can take several seconds on a loaded machine (5-8 s has been seen on Windows), so waits are
+// deadlines measured in time, not a fixed number of quick retries.
+const CONTROL_TIMEOUT_MS = 10_000;
+const HELPER_START_MS = 30_000;
+// A helper started for the Relay pane stops if no pane attaches within this time.
+const AWAIT_UI_MS = 60_000;
+
+async function waitForHelper() {
+  const deadline = Date.now() + HELPER_START_MS;
+  for (;;) {
+    try { return await request("status"); }
+    catch (error) {
+      if (Date.now() >= deadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  }
+}
+
 async function request(command) {
-  const socket = await connectControl({ initialCommand: command, timeout: 3000 });
+  const socket = await connectControl({ initialCommand: command, timeout: CONTROL_TIMEOUT_MS });
   return new Promise((resolve, reject) => {
     let text = "";
     let settled = false;
     const timer = setTimeout(() => {
       socket.destroy();
       finish(new Error("Helper control timeout"));
-    }, 3000);
+    }, CONTROL_TIMEOUT_MS);
     const finish = (error, value) => {
       if (settled) return;
       settled = true;
@@ -274,7 +292,7 @@ async function supervise() {
   });
   if (process.argv[3] !== "--await-ui") startChild();
   else if (!owner) {
-    const idleTimer = setTimeout(() => { if (!owner) stopSupervisor(); }, 15_000);
+    const idleTimer = setTimeout(() => { if (!owner) stopSupervisor(); }, AWAIT_UI_MS);
     idleTimer.unref();
   }
 }
@@ -361,11 +379,8 @@ async function main() {
       cwd: config, detached: true, stdio: "ignore", windowsHide: true, shell: false,
     });
     supervisor.unref();
-    for (let attempt = 0; attempt < 30; attempt++) {
-      try { console.log(JSON.stringify(await request("status"))); return; }
-      catch { await new Promise((resolve) => setTimeout(resolve, 100)); }
-    }
-    throw new Error("The PeerBand helper did not start. Run `peerband status`, then `peerband login` if you are not logged in.");
+    try { console.log(JSON.stringify(await waitForHelper())); return; }
+    catch { throw new Error("The PeerBand helper did not start. Run `peerband status`, then `peerband login` if you are not logged in."); }
   }
   if (command === "start" || command === "enable") {
     await assertConnectorEntry();
@@ -379,17 +394,14 @@ async function main() {
       shell: false,
     });
     supervisor.unref();
-    for (let attempt = 0; attempt < 30; attempt++) {
-      try {
-        console.log(JSON.stringify(await request("status")));
-        return;
-      } catch {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
+    try {
+      console.log(JSON.stringify(await waitForHelper()));
+      return;
+    } catch {
+      throw new Error(
+        "The PeerBand helper did not start. Run `peerband status`, then `peerband login` if you are not logged in.",
+      );
     }
-    throw new Error(
-      "The PeerBand helper did not start. Run `peerband status`, then `peerband login` if you are not logged in.",
-    );
   }
   if (command === "status" || command === "stop" || command === "disable") {
     try {

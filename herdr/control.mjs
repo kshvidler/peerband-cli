@@ -13,7 +13,8 @@ const matches = (a, b) => typeof a === "string" && timingSafeEqual(
   createHash("sha256").update(b).digest(),
 );
 
-export async function connectControl({ timeout = 3000, initialCommand } = {}) {
+// Generous: on a loaded Windows machine the helper can take seconds to answer even a local pipe.
+export async function connectControl({ timeout = 10_000, initialCommand } = {}) {
   const record = JSON.parse(await readFile(recordPath, "utf8"));
   const socket = createConnection(channel);
   await new Promise((resolve, reject) => {

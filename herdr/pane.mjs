@@ -50,14 +50,25 @@ function draw() {
   stdout.write("\x1b[2J\x1b[H" + renderPane({ snapshot, identity, email, messages, error: errorText, columns: stdout.columns, rows: stdout.rows }));
 }
 async function runLifecycle(command) {
-  const { stdout: result } = await exec(process.execPath, [lifecycle, command], { timeout: 5000, windowsHide: true, maxBuffer: 65_536 });
+  // start-ui starts Node twice (lifecycle, then the helper); on a loaded machine that alone can take 10+ seconds.
+  const { stdout: result } = await exec(process.execPath, [lifecycle, command], { timeout: 45_000, windowsHide: true, maxBuffer: 65_536 });
   return JSON.parse(result.trim());
 }
 const controlAlive = () => Boolean(control && !control.destroyed);
+// Renaming the tab runs the herdr CLI (several processes). Do it when the On/Off state changes, not on every refresh.
+let tabState;
+function syncTab(enabled) {
+  if (tabState === enabled) return;
+  tabState = enabled;
+  // Retry on the next refresh when the rename did not happen (it returns false without running herdr when this pane
+  // is not the recorded Relay tab).
+  const retry = () => { if (tabState === enabled) tabState = undefined; };
+  void syncRelayTab(enabled).then((renamed) => { if (!renamed) retry(); }, retry);
+}
 function showUnavailable(message = UNAVAILABLE) {
   snapshot = { state: "stopping", connectionState: "helper-unavailable", activity: snapshot?.activity ?? [] };
   errorText = message;
-  void syncRelayTab(false).catch(() => {});
+  syncTab(false);
 }
 async function refresh() {
   if (closing || pending || refreshInFlight) return;
@@ -66,7 +77,7 @@ async function refresh() {
   const generation = refreshGeneration;
   try {
     const next = await sendUi("ui-status");
-    if (generation === refreshGeneration) { snapshot = next; if (!busyError) errorText = ""; void syncRelayTab(next.state === "running").catch(() => {}); }
+    if (generation === refreshGeneration) { snapshot = next; if (!busyError) errorText = ""; syncTab(next.state === "running"); }
   } catch {
     if (generation !== refreshGeneration) return;
     showUnavailable();
@@ -83,14 +94,16 @@ async function toggle() {
   draw();
   try {
     if (!controlAlive()) {
-      // No helper: Space starts one, like opening the tab does.
+      // No helper: Space starts one, like opening the tab does. That can take a while on a busy machine.
+      errorText = "Starting the PeerBand relay…";
+      draw();
       await attach({ start: true });
       return;
     }
     const next = await sendUi(snapshot?.state === "running" ? "ui-disable" : "ui-enable");
     if (next.error === "busy") throw new Error("The relay is still stopping. Try On again in a moment.");
     snapshot = next;
-    void syncRelayTab(next.state === "running").catch(() => {});
+    syncTab(next.state === "running");
   } catch (error) {
     errorText = error.message || "Could not change the connection. Check enrollment and the helper owner.";
     busyError = error.message === "The relay is still stopping. Try On again in a moment.";
@@ -184,7 +197,7 @@ async function attach({ start }) {
   ownsUi = true;
   snapshot = start ? await sendUi("ui-enable") : attached;
   errorText = "";
-  void syncRelayTab(snapshot.state === "running").catch(() => {});
+  syncTab(snapshot.state === "running");
   draw();
   if (!timer) {
     timer = setInterval(refresh, 1000);
@@ -219,6 +232,8 @@ if (!stdinIsInteractive()) {
   console.log(renderPane({ snapshot, identity, email, messages, error: "Interactive terminal controls are required in this pane." }));
 } else {
   try {
+    errorText = "Starting the PeerBand relay…";
+    draw();
     await attach({ start: true });
     await refresh();
   } catch (error) {
@@ -236,7 +251,7 @@ function sendUi(command) {
   return new Promise((resolve, reject) => {
     if (!control || control.destroyed) { reject(new Error("Relay owner channel is closed")); return; }
     const request = { resolve, reject, timer: undefined };
-    request.timer = setTimeout(() => failControl(new Error("Relay owner request timed out")), 3000);
+    request.timer = setTimeout(() => failControl(new Error("Relay owner request timed out")), 10_000);
     replies.push(request);
     control.write(JSON.stringify({ command }) + "\n");
   });
