@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocketServer } from 'ws';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import addFormatsModule from 'ajv-formats';
-import { ConnectorCore, MockRuntime, pollDeviceToken, redeemEnrollment, requestDeviceCode, runRemoteClient } from '../src/core/index.js';
+import { ConnectorCore, ConnectorEvents, MockRuntime, pollDeviceToken, redeemEnrollment, requestDeviceCode, runRemoteClient } from '../src/core/index.js';
 
 const load = async (name: string) => JSON.parse(await readFile(new URL(`../protocol/${name}`, import.meta.url), 'utf8')) as Record<string, unknown>;
 const addFormats = ((addFormatsModule as unknown as { default?: unknown }).default ?? addFormatsModule) as (a: Ajv2020) => void;
@@ -85,6 +85,61 @@ describe('protocol schemas', () => {
     }
     const errors = fromClient.filter((m) => m.type === 'response' && 'error' in m);
     expect(errors.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('validates the event frames the relay client streams, and resyncs with agents.changed after a reconnect', async () => {
+    const relay = newAjv().compile(await load('relay-messages.schema.json'));
+    const server = createServer();
+    const wss = new WebSocketServer({ server });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    closers.push(() => new Promise<void>((resolve) => { wss.close(); server.close(() => resolve()); }));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('No listener address');
+
+    const runtime = new MockRuntime();
+    const agents = await runtime.listAgents();
+    const events = new ConnectorEvents(runtime);
+    events.start();
+    const connections: Array<{ features: unknown; frames: Array<Record<string, unknown>> }> = [];
+    let resolveDone!: () => void;
+    const done = new Promise<void>((resolve) => { resolveDone = resolve; });
+    wss.on('connection', (ws, request) => {
+      const connection = { features: request.headers['x-peerband-features'], frames: [] as Array<Record<string, unknown>> };
+      connections.push(connection);
+      ws.on('message', (data) => {
+        const frame = JSON.parse(data.toString()) as Record<string, unknown>;
+        connection.frames.push(frame);
+        if (connections.length === 1 && frame.name === 'agents.changed') runtime.setStatus(agents[1]!.id, 'working');
+        if (connections.length === 1 && frame.name === 'agent.status_changed') {
+          void events.notify({ text: 'Done \u001b[31mred\u001b[0m password=hunter2', paneId: 'mock:1' }).then((result) => expect(result.sent).toBe(true));
+        }
+        if (connections.length === 1 && frame.name === 'agent.notified') ws.close(1011, 'restart');
+        if (connections.length === 2 && frame.name === 'agents.changed') resolveDone();
+      });
+    });
+    const abort = new AbortController();
+    const core = new ConnectorCore(runtime);
+    const running = runRemoteClient(core, { serverUrl: `http://127.0.0.1:${address.port}`, installationId: 'i', credential: 'c' }, {
+      signal: abort.signal,
+      events,
+      onStatus: () => undefined,
+      random: () => 0,
+      // While disconnected, a status change happens; it must be dropped, not queued.
+      sleep: async () => { if (connections.length === 1) runtime.setStatus(agents[2]!.id, 'idle'); await new Promise((resolve) => setTimeout(resolve, 2)); },
+    }).catch(() => undefined);
+    await done;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    abort.abort();
+    await running;
+    events.close();
+    await core.close();
+
+    expect(connections.map((connection) => connection.features)).toEqual(['events', 'events']);
+    expect(connections[0]!.frames.map((frame) => frame.name)).toEqual(['agents.changed', 'agent.status_changed', 'agent.notified']);
+    expect(connections[1]!.frames.map((frame) => frame.name)).toEqual(['agents.changed']);
+    expect(connections[0]!.frames[1]!.data).toEqual({ agentId: agents[1]!.id, status: 'working', previousStatus: 'idle', label: agents[1]!.label, workspace: agents[1]!.workspace, revision: null });
+    expect(connections[0]!.frames[2]!.data).toEqual({ agentId: agents[1]!.id, text: 'Done red password=[REDACTED]', audience: 'owner' });
+    for (const frame of connections.flatMap((connection) => connection.frames)) expect(relay(frame), JSON.stringify(relay.errors)).toBe(true);
   });
 
   it('describes the enrollment request and response the client uses', async () => {

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, rmdir, unlink, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { dirname, join } from 'node:path';
+import type { RuntimeEvent, RuntimeEventListener } from './events.js';
 
 export type AgentStatus = 'idle' | 'working' | 'blocked' | 'done' | 'unknown';
 
@@ -46,6 +47,10 @@ export interface RuntimeAdapter {
   sendMessage(id: string, message: string): Promise<void>;
   getCapabilities(): Capabilities;
   close?(): Promise<void>;
+  /** Agent status and list-change events (metadata only). Returns an unsubscribe function. */
+  onEvent?(listener: RuntimeEventListener): () => void;
+  /** Maps a runtime pane id (for example HERDR_PANE_ID) to the agent id list_agents reports. */
+  agentIdForPane?(paneId: string): Promise<string | undefined>;
 }
 
 export class ConnectError extends Error {
@@ -107,6 +112,7 @@ export class MockRuntime implements RuntimeAdapter {
   private readonly agents = new Map<string, AgentRecord>();
   private readonly retired = new Set<string>();
   private readonly output = new Map<string, string>();
+  private readonly listeners = new Set<RuntimeEventListener>();
   private readonly machineId: string;
 
   constructor(machineId = 'mock-machine') {
@@ -150,6 +156,33 @@ export class MockRuntime implements RuntimeAdapter {
     return { readOutput: true, sendMessage: true };
   }
 
+  onEvent(listener: RuntimeEventListener): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  }
+
+  /** Mock panes are named `mock:<index>` in seed order. */
+  async agentIdForPane(paneId: string): Promise<string | undefined> {
+    const match = /^mock:(\d+)$/.exec(paneId);
+    return match ? [...this.agents.keys()][Number(match[1])] : undefined;
+  }
+
+  /** Changes an agent's status and emits a status event, as a real runtime would. */
+  setStatus(id: string, status: AgentRecord['status']): void {
+    const agent = this.agents.get(id);
+    if (!agent) throw new ConnectError('agent_not_found', 'No agent has this identity.', 'List agents and use an exact agent ID.');
+    const previousStatus = agent.status;
+    if (previousStatus === status) return;
+    agent.status = status;
+    agent.rawStatus = status;
+    agent.observedAt = new Date().toISOString();
+    this.emit({ kind: 'status', agentId: id, status, previousStatus, label: agent.label, workspace: agent.workspace, revision: null });
+  }
+
+  private emit(event: RuntimeEvent): void {
+    for (const listener of [...this.listeners]) listener(event);
+  }
+
   /** Simulate a pane being reused: retire the old handle and create a fresh opaque identity. */
   replaceAgent(id: string): AgentRecord {
     const previous = this.agents.get(id);
@@ -160,6 +193,7 @@ export class MockRuntime implements RuntimeAdapter {
     const replacement = { ...previous, id: `mock-${randomUUID()}`, observedAt: new Date().toISOString(), status: 'idle' as const, rawStatus: 'idle' };
     this.agents.set(replacement.id, replacement);
     this.output.set(replacement.id, 'Replacement agent is idle.');
+    this.emit({ kind: 'agents_changed' });
     return structuredClone(replacement);
   }
 }

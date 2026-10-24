@@ -79,6 +79,8 @@ async function supervise() {
   let owner = null;
   let connectionState = "disabled";
   let activity = [];
+  // `peerband notify` requests waiting for the connector child's answer, by id.
+  const pendingNotes = new Map();
   try {
     const previous = JSON.parse(await readFile(paneStatePath, "utf8"));
     activity = createPaneSnapshot(previous).activity;
@@ -117,7 +119,8 @@ async function supervise() {
         uiOwned = true;
         if (!child) startChild();
         reply(currentSnapshot());
-      } else if (input.command === "status") reply(currentSnapshot(), true);
+      } else if (input.command === "notify") forwardNote(input, reply);
+      else if (input.command === "status") reply(currentSnapshot(), true);
       else if (input.command === "stop") {
         reply({ state: "stopping" }, true);
         stopSupervisor();
@@ -136,7 +139,8 @@ async function supervise() {
     };
     socket.on("data", (chunk) => {
       buffer += chunk.toString();
-      if (buffer.length > 4096) { socket.destroy(); return; }
+      // Room for a `notify` line (a note of up to 1024 characters, JSON-escaped); other commands are tiny.
+      if (buffer.length > 16384) { socket.destroy(); return; }
       let newline;
       while ((newline = buffer.indexOf("\n")) >= 0) {
         const line = buffer.slice(0, newline);
@@ -146,6 +150,49 @@ async function supervise() {
       }
     });
   });
+  // Hands a note to the connector child, which sends it to PeerBand as an `agent.notified` event.
+  function forwardNote(input, reply) {
+    const text = input.text;
+    const paneId = input.paneId;
+    if (typeof text !== "string" || text.length > 4096 || (paneId !== undefined && (typeof paneId !== "string" || paneId.length > 128))) {
+      reply({ error: "invalid", message: "The note must be text of at most 1024 characters." }, true);
+      return;
+    }
+    const current = child;
+    if (!current || stopping || finalStop || !current.connected) {
+      reply({ error: "not-running", message: "The relay is turned off." }, true);
+      return;
+    }
+    const id = randomBytes(12).toString("hex");
+    const timer = setTimeout(() => {
+      if (!pendingNotes.delete(id)) return;
+      reply({ error: "timeout", message: "The connector did not answer in time." }, true);
+    }, 5000);
+    timer.unref();
+    pendingNotes.set(id, { reply, timer });
+    current.send({ type: "peerband:notify", id, text, ...(paneId ? { paneId } : {}) }, (error) => {
+      if (!error || !pendingNotes.delete(id)) return;
+      clearTimeout(timer);
+      reply({ error: "not-running", message: "The connector is not reachable." }, true);
+    });
+  }
+  function settleNote(message) {
+    const pending = pendingNotes.get(message.id);
+    if (!pending) return;
+    pendingNotes.delete(message.id);
+    clearTimeout(pending.timer);
+    const text = (value, max) => (typeof value === "string" ? value.slice(0, max) : undefined);
+    pending.reply(message.ok === true
+      ? { ok: true, sent: message.sent === true, agentId: text(message.agentId, 256) ?? null, ...(text(message.eventId, 64) ? { eventId: text(message.eventId, 64) } : {}) }
+      : { error: text(message.code, 64) ?? "error", message: text(message.message, 512) ?? "The note could not be sent.", ...(text(message.nextStep, 512) ? { nextStep: text(message.nextStep, 512) } : {}) }, true);
+  }
+  const failNotes = () => {
+    for (const [id, pending] of pendingNotes) {
+      pendingNotes.delete(id);
+      clearTimeout(pending.timer);
+      pending.reply({ error: "not-running", message: "The connector stopped before sending the note." }, true);
+    }
+  };
   const cleanup = async () => {
     if (owner) { const previous = owner; owner = null; previous.destroy(); }
     server.close();
@@ -187,6 +234,7 @@ async function supervise() {
     save();
     current.on("message", (message) => {
       if (child !== current) return;
+      if (message && typeof message === "object" && message.type === "peerband:notify-result" && typeof message.id === "string") { settleNote(message); return; }
       const event = normalizePaneEvent(message);
       if (!event) return;
       if (event.kind === "connection") connectionState = stopping && event.state !== "revoked" ? "disabled" : event.state;
@@ -202,6 +250,7 @@ async function supervise() {
     current.once("exit", () => {
       if (child !== current) return;
       child = null;
+      failNotes();
       if (stopping) connectionState = "disabled";
       else if (connectionState !== "revoked") connectionState = "unavailable";
       save();

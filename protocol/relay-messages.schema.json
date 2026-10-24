@@ -2,14 +2,68 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://peerband.com/schemas/relay-messages.schema.json",
   "title": "PeerBand relay WebSocket messages",
-  "description": "Text frames (UTF-8 JSON, at most 65536 bytes) exchanged on wss://<server>/connections after the client authenticates with `Authorization: Bearer <installation credential>`. Discriminator: the `type` field. Binary frames are protocol errors.",
+  "description": "Text frames (UTF-8 JSON, at most 65536 bytes) exchanged on wss://<server>/connections after the client authenticates with `Authorization: Bearer <installation credential>`. A client that streams agent events also sends `x-peerband-features: events` on the upgrade request. Discriminator: the `type` field. Binary frames are protocol errors; receivers ignore frame types they do not know.",
   "oneOf": [
     { "$ref": "#/$defs/request" },
     { "$ref": "#/$defs/ping" },
     { "$ref": "#/$defs/pong" },
-    { "$ref": "#/$defs/response" }
+    { "$ref": "#/$defs/response" },
+    { "$ref": "#/$defs/event" }
   ],
   "$defs": {
+    "agentStatus": { "enum": ["idle", "working", "blocked", "done", "unknown"] },
+    "event": {
+      "title": "client -> server: agent event",
+      "description": "Pushed by the client when an agent changes, so MCP clients and the dashboard read output only when something happened. Metadata only: events never carry terminal output; `agent.notified` carries a short sanitized note for the machine owner. Sent only while the socket is open (never queued); after every (re)connect the client sends one `agents.changed` so consumers resync. The client coalesces bursts (at most one `agent.status_changed` per agent per 250 ms, latest wins) and caps its overall event rate. The envelope (eventId, name, timestamp, data) is shaped so it can be forwarded as MCP events later.",
+      "type": "object",
+      "required": ["type", "eventId", "name", "timestamp", "data"],
+      "properties": {
+        "type": { "const": "event" },
+        "eventId": { "type": "string", "format": "uuid", "description": "Random UUID v4, unique per event." },
+        "name": { "enum": ["agent.status_changed", "agents.changed", "agent.notified"] },
+        "timestamp": { "type": "string", "format": "date-time", "description": "When the client observed the event, ISO 8601 in UTC." },
+        "data": { "type": "object" }
+      },
+      "additionalProperties": false,
+      "oneOf": [
+        { "properties": { "name": { "const": "agent.status_changed" }, "data": { "$ref": "#/$defs/agentStatusChanged" } } },
+        { "properties": { "name": { "const": "agents.changed" }, "data": { "$ref": "#/$defs/agentsChanged" } } },
+        { "properties": { "name": { "const": "agent.notified" }, "data": { "$ref": "#/$defs/agentNotified" } } }
+      ]
+    },
+    "agentStatusChanged": {
+      "title": "data of agent.status_changed",
+      "description": "`agentId`, `label` and `workspace` are the values list_agents reports for the agent. `previousStatus` is null when the client had not seen the agent before; `revision` is the runtime's revision counter for the agent when known.",
+      "type": "object",
+      "required": ["agentId", "status", "previousStatus", "label", "workspace", "revision"],
+      "properties": {
+        "agentId": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "status": { "$ref": "#/$defs/agentStatus" },
+        "previousStatus": { "enum": ["idle", "working", "blocked", "done", "unknown", null] },
+        "label": { "type": "string" },
+        "workspace": { "type": ["string", "null"] },
+        "revision": { "type": ["integer", "null"], "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "agentsChanged": {
+      "title": "data of agents.changed",
+      "description": "Agents appeared, exited or changed occupant (or events may have been missed): consumers should call list_agents again.",
+      "type": "object",
+      "maxProperties": 0
+    },
+    "agentNotified": {
+      "title": "data of agent.notified",
+      "description": "A note sent with `peerband notify` from inside an agent's pane. `agentId` is that agent, or null when it could not be identified. The text is stripped of control characters and passed through the client's secret redaction. It is meant for the machine owner only (`audience`).",
+      "type": "object",
+      "required": ["agentId", "text", "audience"],
+      "properties": {
+        "agentId": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 },
+        "text": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "audience": { "const": "owner" }
+      },
+      "additionalProperties": false
+    },
     "errorBody": {
       "type": "object",
       "required": ["code", "message", "next_step"],

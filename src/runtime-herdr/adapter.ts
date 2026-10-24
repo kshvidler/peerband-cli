@@ -2,7 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { ConnectError, sanitizeOutput, type AgentRecord, type Capabilities, type OutputOptions, type OutputResult, type RuntimeAdapter } from '../core/index.js';
+import { ConnectError, sanitizeOutput, type AgentRecord, type Capabilities, type OutputOptions, type OutputResult, type RuntimeAdapter, type RuntimeEventListener } from '../core/index.js';
+import { HerdrEventBridge, type BridgeAgent, type HerdrEventBridgeOptions } from './events.js';
 import { HerdrSocketClient } from './socket-client.js';
 import { loadHerdrSchema, type ValidatedHerdrSchema } from './schema.js';
 
@@ -12,6 +13,10 @@ export interface HerdrAdapterOptions {
   binary?: string;
   machineId?: string;
   timeoutMs?: number;
+  /** One-line notices from the event stream (for example when Herdr has no event support). */
+  log?: (message: string) => void;
+  /** Test seams for the event stream. */
+  events?: Omit<HerdrEventBridgeOptions, 'log'>;
 }
 
 interface HerdrAgent {
@@ -42,6 +47,9 @@ export class HerdrAdapter implements RuntimeAdapter {
   private endpointMarker?: string;
   private socketPath?: string;
   private refreshing?: Promise<AgentRecord[]>;
+  private listed = false;
+  private records = new Map<string, AgentRecord>();
+  private bridge?: HerdrEventBridge;
 
   constructor(options: HerdrAdapterOptions = {}) {
     this.options = options;
@@ -81,8 +89,39 @@ export class HerdrAdapter implements RuntimeAdapter {
       records.push(toRecord(live, this.machineId, promptTarget(raw, rawAgents) !== undefined));
     }
     for (const previous of previousTargets) if (!nextIds.has(previous.id)) this.retired.add(previous.id);
+    const idsChanged = this.listed && (nextIds.size !== previousTargets.length || previousTargets.some((item) => !nextIds.has(item.id)));
     this.current = next;
+    this.records = new Map(records.map((record) => [record.id, record]));
+    this.listed = true;
+    this.bridge?.agentsRefreshed(idsChanged);
     return records;
+  }
+
+  /** Status and list-change events from Herdr's events.subscribe (metadata only, never pane text). */
+  onEvent(listener: RuntimeEventListener): () => void {
+    this.bridge ??= new HerdrEventBridge({
+      prepare: async () => {
+        const { schema } = await this.initialize();
+        const request = schema.schema.schemas.request as { oneOf?: Array<{ properties?: { method?: { const?: unknown } } }> };
+        return {
+          socketPath: platformSocketAddress(this.socketPath!),
+          validateRequest: schema.validateRequest,
+          supportsEvents: Boolean(request.oneOf?.some((branch) => branch.properties?.method?.const === 'events.subscribe')),
+        };
+      },
+      refresh: async () => { await this.listAgents(); },
+      agents: () => [...this.current.values()].map((live): BridgeAgent => {
+        const record = this.records.get(live.id);
+        return { paneId: live.agent.pane_id, agentId: live.id, status: record?.status ?? 'unknown', label: record?.label ?? 'Herdr agent', workspace: record?.workspace ?? live.agent.workspace_id, revision: live.agent.revision };
+      }),
+    }, { ...this.options.events, log: this.options.log });
+    return this.bridge.subscribe(listener);
+  }
+
+  /** The agent id for a Herdr pane id such as HERDR_PANE_ID, after a fresh agent.list. */
+  async agentIdForPane(paneId: string): Promise<string | undefined> {
+    await this.listAgents();
+    return this.current.get(paneId)?.id;
   }
 
   async getAgent(id: string): Promise<AgentRecord> {
@@ -135,6 +174,7 @@ export class HerdrAdapter implements RuntimeAdapter {
   }
 
   async close(): Promise<void> {
+    await this.bridge?.stop();
     const pending = await this.ready?.catch(() => undefined);
     await pending?.client.close();
   }
