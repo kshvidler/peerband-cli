@@ -8,9 +8,32 @@ export type RelaySnapshot = PaneSnapshot & { source: 'control' | 'file' };
 
 /** Sends one authenticated command to the live relay helper and returns its JSON reply. */
 export async function requestControl(command: 'status' | 'stop', env: NodeJS.ProcessEnv, timeoutMs = 3000): Promise<Record<string, unknown>> {
+  return exchange({ command }, env, timeoutMs);
+}
+
+/** Why a control request failed: nothing is listening, or a helper answered unexpectedly. */
+export class ControlUnavailable extends Error {
+  constructor(readonly reason: 'not-running' | 'closed' | 'timeout', message: string) {
+    super(message);
+    this.name = 'ControlUnavailable';
+  }
+}
+
+/** Asks the running relay to send an owner-directed note (`peerband notify`). */
+export async function requestNotify(note: { text: string; paneId?: string }, env: NodeJS.ProcessEnv, timeoutMs = 8000): Promise<Record<string, unknown>> {
+  return exchange({ command: 'notify', text: note.text, ...(note.paneId ? { paneId: note.paneId } : {}) }, env, timeoutMs, true);
+}
+
+async function exchange(payload: Record<string, unknown>, env: NodeJS.ProcessEnv, timeoutMs: number, typed = false): Promise<Record<string, unknown>> {
   const config = configHome({ env });
-  const record = JSON.parse(await readFile(ownerRecordPath(config), 'utf8')) as { token?: unknown };
-  if (typeof record.token !== 'string') throw new Error('Invalid helper record');
+  let record: { token?: unknown };
+  try {
+    record = JSON.parse(await readFile(ownerRecordPath(config), 'utf8')) as { token?: unknown };
+  } catch (error) {
+    if (typed) throw new ControlUnavailable('not-running', 'No relay helper is running');
+    throw error;
+  }
+  if (typeof record.token !== 'string') throw typed ? new ControlUnavailable('not-running', 'Invalid helper record') : new Error('Invalid helper record');
   const socket = createConnection(controlChannel(config));
   return new Promise((resolve, reject) => {
     let text = '';
@@ -23,9 +46,13 @@ export async function requestControl(command: 'status' | 'stop', env: NodeJS.Pro
       if (error) reject(error);
       else resolve(value ?? {});
     };
-    const timer = setTimeout(() => finish(new Error('Helper control timeout')), timeoutMs);
-    socket.once('error', (error) => finish(error));
-    socket.once('connect', () => socket.write(`${JSON.stringify({ token: record.token, command })}\n`));
+    let connected = false;
+    const timer = setTimeout(() => finish(typed ? new ControlUnavailable('timeout', 'Helper control timeout') : new Error('Helper control timeout')), timeoutMs);
+    socket.once('error', (error) => finish(typed ? new ControlUnavailable(connected ? 'closed' : 'not-running', error.message) : error));
+    socket.once('connect', () => {
+      connected = true;
+      socket.write(`${JSON.stringify({ token: record.token, ...payload })}\n`);
+    });
     socket.on('data', (chunk) => {
       text += chunk.toString();
       if (text.length > 65_536) return finish(new Error('Invalid control response'));
@@ -37,7 +64,7 @@ export async function requestControl(command: 'status' | 'stop', env: NodeJS.Pro
         finish(error as Error);
       }
     });
-    socket.once('end', () => finish(new Error('Helper control closed')));
+    socket.once('end', () => finish(typed ? new ControlUnavailable('closed', 'Helper control closed') : new Error('Helper control closed')));
   });
 }
 
