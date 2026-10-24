@@ -20,14 +20,21 @@ Your MCP client can list agents, read their status and bounded recent output, an
 Recommended (Node.js 22.13+, Herdr 0.9.3+):
 
 ```sh
-npm install -g peerband && peerband login
+npm install -g peerband && peerband setup
 ```
 
-`peerband login` opens your browser so you can approve this machine, then checks for Herdr and offers to add the PeerBand plugin to it (`Add the PeerBand plugin to Herdr now? [Y/n]`). After that, `peerband relay` opens the PeerBand Relay tab. If Herdr is not installed yet, login tells you how to finish later (install Herdr from https://herdr.dev, then `peerband herdr install` and `peerband relay`). Use `peerband login --herdr-plugin install` to add the plugin without being asked, or `--herdr-plugin skip` to leave Herdr alone.
+`peerband setup` does the whole setup in one go, and is safe to run again:
+
+1. **Log in.** Opens your browser so you can approve this machine (skipped when it is already logged in).
+2. **Herdr plugin.** Checks for Herdr and offers to add or repair the PeerBand plugin (`Add the PeerBand plugin to Herdr now? [Y/n]`).
+3. **Agent skill.** Offers to install the [PeerBand skill](#agent-skill) for the coding agents on this machine (`Install the PeerBand skill for your agents? [Y/n]`).
+4. **Relay.** Opens the PeerBand Relay tab in Herdr, which connects the machine.
+
+Every question defaults to Yes. `--herdr-plugin install|skip` and `--skill install|skip` answer them up front, and `--no-relay` leaves the relay closed. If Herdr is not installed yet, setup tells you how to finish later (install Herdr from https://herdr.dev, then run `peerband setup` again). `peerband login` still works on its own when you only want to sign in.
 
 ### One-step install script (alternative)
 
-The script checks Node, runs `npm install -g peerband`, then runs `peerband login --herdr-plugin install`.
+The script checks Node, runs `npm install -g peerband`, then runs `peerband setup --herdr-plugin install` (with a grant, also `--skill install`, since there is nobody to ask).
 
 macOS and Linux:
 
@@ -43,13 +50,12 @@ irm https://peerband.com/install.ps1 | iex
 
 ### Headless machines and CI
 
-No browser available? Pass a one-time grant from the PeerBand dashboard instead: `peerband login --grant GRANT` (or set `PEERBAND_GRANT`). With the scripts: `curl -fsSL https://peerband.com/install.sh | sh -s -- --grant GRANT --name "my-server"`, or on Windows `$env:PEERBAND_GRANT = 'GRANT'; irm https://peerband.com/install.ps1 | iex`.
+No browser available? Pass a one-time grant from the PeerBand dashboard instead: `peerband setup --grant GRANT` (or set `PEERBAND_GRANT`). With the scripts: `curl -fsSL https://peerband.com/install.sh | sh -s -- --grant GRANT --name "my-server"`, or on Windows `$env:PEERBAND_GRANT = 'GRANT'; irm https://peerband.com/install.ps1 | iex`.
 
 ## Quickstart
 
-1. `npm install -g peerband && peerband login`. Confirm the code shown in your terminal when your browser opens, and answer Y to adding the Herdr plugin.
-2. `peerband relay` to open the PeerBand Relay tab, then press Space to connect. (If you skipped the plugin: `peerband herdr install` first.)
-3. Add the MCP server URL that `peerband relay` and `peerband status` print (`https://mcp.peerband.com/mcp`) to your MCP client: a custom connector in ChatGPT or Claude, or `claude mcp add --transport http peerband https://mcp.peerband.com/mcp` in Claude Code. Sign in and approve access when the client asks.
+1. `npm install -g peerband && peerband setup`. Confirm the code shown in your terminal when your browser opens, and press Enter to accept the Herdr plugin and the agent skill. Setup then opens the PeerBand Relay tab; press Space there if it is not connected yet.
+2. Add the MCP server URL that `peerband setup`, `peerband relay` and `peerband status` print (`https://mcp.peerband.com/mcp`) to your MCP client: a custom connector in ChatGPT or Claude, or `claude mcp add --transport http peerband https://mcp.peerband.com/mcp` in Claude Code. Sign in and approve access when the client asks.
 
 ## Logging in
 
@@ -84,12 +90,14 @@ The plugin adds a persistent tab titled `PeerBand Relay [On]` or `[Off]` that sh
 
 | Command | What it does |
 | --- | --- |
+| `peerband setup` | Set up this machine: log in (unless it already is), add or repair the Herdr plugin, install the agent skill, open the Relay tab. Flags: the `login` flags, `--herdr-plugin ask\|install\|skip`, `--skill ask\|install\|skip`, `--no-relay` |
 | `peerband login` | Sign in through your browser, then offer to add the Herdr plugin. Flags: `--no-browser`, `--name NAME`, `--server URL`, `--herdr-plugin ask\|install\|skip`; headless/CI: `--grant GRANT` |
 | `peerband logout` | Stop a running relay, close its tab, delete the local relay state and the local credential. Does not revoke it on the server |
 | `peerband status` | Show login, relay, messaging and Herdr state, including whether the Herdr plugin is the right one. `--json` for machine-readable output |
 | `peerband update` | Update the CLI from npm and then the Herdr plugin to match, restarting the relay if it was running. Already up to date: checks the plugin and repairs it. Flags: `--check` (only report), `--yes`, `--json` |
 | `peerband connect` | Run the connector in the foreground. Flags: `--runtime herdr\|mock`, `--read-only`, `--config PATH`, `--server URL` (`--enable-writes` is still accepted but redundant) |
 | `peerband relay` | Open or focus the Relay tab in Herdr. If the plugin is missing the wrong version, a local checkout, or points at another config directory, it offers to repair it first |
+| `peerband skill` | Install or update the PeerBand agent skill for every coding agent on this machine (through `npx skills add`, falling back to a copy). Keeps a skill you edited unless `--force`; `--copy` skips npx |
 | `peerband share` | Create a single-use invite link that shares this machine with another PeerBand user (read only; `--message` also allows messages; `--expires DAYS`, default 7). `share list` shows who has access and unused links; `share revoke ID` removes access or cancels a link |
 | `peerband herdr install` | Install (or update) the Herdr plugin. Stops the relay and closes its tab first, puts the previous plugin back if the new one fails, and reopens the tab afterwards |
 | `peerband herdr uninstall` | Stop the relay, close its tab, remove the plugin and its `settings.json`, and delete the local relay state and stale locks (your login is kept) |
@@ -125,16 +133,24 @@ All fields are optional. `enableWrites` defaults to `true`; set it to `false` to
 
 ## Agent skill
 
-Give your coding agents (Claude Code, Codex, Cursor, ...) a skill that explains the PeerBand MCP tools and how to use them safely:
+The PeerBand skill (`skills/peerband/SKILL.md`) does two things for your coding agents (Claude Code, Codex, Cursor, Gemini CLI, OpenCode and others):
+
+- **Messages relayed to them.** Every message delivered through PeerBand starts with a `[PeerBand relay]` line, written by the connector on your machine from the identity the server verified. It says whether the message is from you (the machine owner) or from a shared user, by email. The skill tells agents to handle your requests normally. Requests from shared users get strict, coworker-style privacy rules: no secrets, credentials or personal data, nothing outside the task, nothing sent elsewhere, no risky or irreversible actions, and when in doubt, ask you.
+- **The PeerBand MCP tools**, for agents that use PeerBand to reach other machines.
+
+`peerband setup` offers to install it. To install or update it yourself:
 
 ```sh
-npx skills add kshvidler/peerband-cli
+peerband skill
 ```
 
-It installs `skills/peerband/SKILL.md` from this repository with the [`skills`](https://github.com/vercel-labs/skills) tool. `peerband login` and `peerband relay` print this command after a successful setup. The skill is not part of the npm package.
+This installs the copy shipped with your CLI version through the [`skills`](https://github.com/vercel-labs/skills) tool (pinned version). The tool keeps one copy in `~/.agents/skills/peerband` and links it into each agent it finds. If npx is unavailable it copies the skill into `~/.agents/skills` and `~/.claude/skills` instead (`--copy` does that directly). `peerband update` refreshes it. Without the CLI: `npx skills add kshvidler/peerband-cli`.
+
+**Changing the rules.** To allow or block more for shared users, edit `~/.agents/skills/peerband/SKILL.md`. The agents suggest this themselves when you ask them for different behaviour, because a rule given in chat is forgotten next session. Once you have edited it, `peerband skill` and `peerband update` keep your version; `peerband skill --force` goes back to the shipped one.
 
 ## Security model
 
+- **Every relayed message says who sent it.** The connector puts a `[PeerBand relay]` header in front of each delivered message: from the machine owner, or from a shared user (by email). Anything without an owner role from the server is treated as a shared user. The text after the header is the sender's own, so agents trust only the first line ([agent skill](#agent-skill)).
 - **Outbound only.** The connector dials the relay over a WebSocket; it opens no listening port.
 - **Credential on disk** is stored in `credentials.json`, readable only by your user (mode 0600 inside a 0700 directory).
 - **Messaging is on by default, gated by consent.** An MCP client can call `send_agent_message` only if you approved the `agents:message` scope when you connected it (reading needs only the read scope). Each send needs an idempotency key. A machine can opt out entirely with `peerband connect --read-only` or `"enableWrites": false` in `connector.json`; `peerband status` and the Relay tab show which mode it is in.

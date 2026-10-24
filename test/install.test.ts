@@ -188,14 +188,14 @@ describe.each(shells)("$label", (sh) => {
     expect(r.out).toMatch(/--?name[\s\S]*--?grant/i);
   });
 
-  it("runs an interactive peerband login with no grant by default", async () => {
+  it("runs an interactive peerband setup with no grant by default (the skill question is left to setup)", async () => {
     const r = await run(sh, { name: "dev-box" });
     expect(r.status).toBe(0);
-    const login = r.calls.find((l) => l.startsWith("peerband login"))!;
-    expect(argvOf(login)).toBe("peerband login --herdr-plugin install --name dev-box");
-    expect(envOf(login)).toBe("PEERBAND_GRANT=");
+    const setup = r.calls.find((l) => l.startsWith("peerband setup"))!;
+    expect(argvOf(setup)).toBe("peerband setup --herdr-plugin install --name dev-box");
+    expect(envOf(setup)).toBe("PEERBAND_GRANT=");
     const plain = await run(sh, {});
-    expect(argvOf(plain.calls.find((l) => l.startsWith("peerband login"))!)).toBe("peerband login --herdr-plugin install");
+    expect(argvOf(plain.calls.find((l) => l.startsWith("peerband setup"))!)).toBe("peerband setup --herdr-plugin install");
   });
 
   it("exits 2 on an unknown argument", async () => {
@@ -239,26 +239,27 @@ describe.each(shells)("$label", (sh) => {
   it("passes the grant through the environment, never argv or output", async () => {
     const r = await run(sh, { grant: GRANT, name: "dev-box" }, {}, { herdr: true });
     expect(r.status).toBe(0);
-    const login = r.calls.find((l) => l.startsWith("peerband login"))!;
-    expect(argvOf(login)).toBe("peerband login --herdr-plugin install --name dev-box");
-    expect(envOf(login)).toBe(`PEERBAND_GRANT=${GRANT}`);
+    const setup = r.calls.find((l) => l.startsWith("peerband setup"))!;
+    expect(argvOf(setup)).toBe("peerband setup --herdr-plugin install --skill install --name dev-box");
+    expect(envOf(setup)).toBe(`PEERBAND_GRANT=${GRANT}`);
     for (const l of r.calls) expect(argvOf(l)).not.toContain(GRANT);
     expect(r.out).not.toContain(GRANT);
   });
 
   it("accepts the grant and name from the environment", async () => {
     const r = await run(sh, {}, { PEERBAND_GRANT: GRANT, PEERBAND_NAME: "from-env" });
-    const login = r.calls.find((l) => l.startsWith("peerband login"))!;
-    expect(argvOf(login)).toBe("peerband login --herdr-plugin install --name from-env");
-    expect(envOf(login)).toBe(`PEERBAND_GRANT=${GRANT}`);
+    const setup = r.calls.find((l) => l.startsWith("peerband setup"))!;
+    expect(argvOf(setup)).toBe("peerband setup --herdr-plugin install --skill install --name from-env");
+    expect(envOf(setup)).toBe(`PEERBAND_GRANT=${GRANT}`);
   });
 
-  it("delegates the Herdr plugin to login (--herdr-plugin install) and prints the right ending", async () => {
+  it("delegates the plugin, skill and relay to setup and prints the right ending", async () => {
     const withHerdr = await run(sh, { grant: GRANT }, {}, { herdr: true });
     expect(withHerdr.status).toBe(0);
-    expect(withHerdr.calls.map(argvOf)).toContain("peerband login --herdr-plugin install");
+    expect(withHerdr.calls.map(argvOf)).toContain("peerband setup --herdr-plugin install --skill install");
     expect(withHerdr.calls.map(argvOf)).not.toContain("peerband herdr install");
-    expect(withHerdr.out).toMatch(/peerband relay/);
+    // setup already opened the relay; the installer only points at status.
+    expect(withHerdr.out).not.toMatch(/Next:/);
     expect(withHerdr.out).toMatch(/peerband status/);
 
     const without = await run(sh, { grant: GRANT });
@@ -268,14 +269,14 @@ describe.each(shells)("$label", (sh) => {
     // Without Herdr, don't claim it's ready or send people straight to `peerband relay`.
     expect(without.out).not.toMatch(/PeerBand is ready/);
     expect(without.out).toMatch(/installed and logged in/);
-    expect(without.out).toMatch(/peerband herdr install\s+then\s+peerband relay/);
+    expect(without.out).toMatch(/peerband setup\s+adds the Herdr plugin and opens the relay/);
   });
 
   it("runs the CLI it installed, not another peerband earlier on PATH", async () => {
     const r = await run(sh, { grant: GRANT }, {}, { herdr: true, shadow: true });
     expect(r.status).toBe(0);
     expect(r.calls.some((l) => l.startsWith("shadow-peerband"))).toBe(false);
-    expect(r.calls.map(argvOf)).toContain("peerband login --herdr-plugin install");
+    expect(r.calls.map(argvOf)).toContain("peerband setup --herdr-plugin install --skill install");
     expect(r.out).toMatch(/Another peerband command comes first on your PATH/);
   });
 
@@ -286,10 +287,10 @@ describe.each(shells)("$label", (sh) => {
     expect(r.calls.some((l) => l.startsWith("peerband"))).toBe(false);
   });
 
-  it("reports a login failure without echoing the grant", async () => {
+  it("reports a setup failure without echoing the grant", async () => {
     const r = await run(sh, { grant: GRANT }, { FAKE_PEERBAND_EXIT: "1" }, { herdr: true });
     expect(r.status).toBe(1);
-    expect(r.out).toMatch(/login failed/);
+    expect(r.out).toMatch(/setup failed/);
     expect(r.out).not.toContain(GRANT);
     expect(r.calls.map(argvOf)).not.toContain("peerband herdr install");
   });

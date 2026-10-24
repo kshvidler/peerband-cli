@@ -110,7 +110,8 @@ async function reopenRelay(ctx: Ctx): Promise<boolean> {
 }
 
 /** `peerband herdr install`: safely replace the plugin, then restore the relay if it was in use. */
-export async function installPlugin(ctx: Ctx, options: { afterUpdate?: boolean } = {}): Promise<number> {
+/** `relayNext: false` leaves out the closing "Next: peerband relay" (peerband setup opens the relay itself). */
+export async function installPlugin(ctx: Ctx, options: { afterUpdate?: boolean; relayNext?: boolean } = {}): Promise<number> {
   const s = ctx.out.stdout;
   const source = ctx.env.PEERBAND_HERDR_SOURCE || DEFAULT_SOURCE;
   const ref = ctx.env.PEERBAND_HERDR_REF || `v${ctx.version}`;
@@ -147,7 +148,7 @@ export async function installPlugin(ctx: Ctx, options: { afterUpdate?: boolean }
   if (!after.installed) throw new CliError('Herdr does not list the PeerBand plugin after installing it.', 'Run `herdr plugin list` and check the output above for errors.');
   if (restore) {
     await reopenRelay(ctx);
-  } else {
+  } else if (options.relayNext !== false) {
     ctx.out.print(`${s.dim('Next:')} ${loggedIn ? 'peerband relay' : 'peerband login, then peerband relay'}`);
   }
   if (options.afterUpdate) ctx.out.print(`${s.green(symbols.ok)} PeerBand ${ctx.version} is ready.`);

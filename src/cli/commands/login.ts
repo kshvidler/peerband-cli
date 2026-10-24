@@ -12,7 +12,7 @@ import {
 import { str } from '../args.js';
 import { browserDecision, openBrowser } from '../browser.js';
 import { sanitize, symbols } from '../output.js';
-import { CliError, type CommandSpec, type Ctx, UsageError } from '../types.js';
+import { CliError, type CommandSpec, type Ctx, type Parsed, UsageError } from '../types.js';
 import { herdrSetup, HERDR_PLUGIN_MODES, type HerdrPluginMode } from './herdr-setup.js';
 import { credentialsFile, printSkillTip } from './shared.js';
 
@@ -186,29 +186,40 @@ export const spec: CommandSpec = {
   ],
   notes: ['The code you confirm in the browser must match the one shown here. The secret device code and any grant are never printed or stored. Plain HTTP is only accepted for localhost.'],
   async run(parsed, ctx) {
-    const rawMode = str(parsed, 'herdr-plugin')?.trim().toLowerCase() ?? 'ask';
-    if (!(HERDR_PLUGIN_MODES as readonly string[]).includes(rawMode)) throw new UsageError(`Invalid --herdr-plugin value "${rawMode}".`, 'Use --herdr-plugin ask, install or skip.');
-    const herdrMode = rawMode as HerdrPluginMode;
-    const serverUrl = resolveServerUrl(str(parsed, 'server'), ctx.env);
-    const name = str(parsed, 'name')?.trim() || hostname();
-    // The grant is a secret: never leave it in this process environment or in child environments.
-    const grant = (str(parsed, 'grant') ?? ctx.env.PEERBAND_GRANT)?.trim();
-    delete ctx.env.PEERBAND_GRANT;
-    if (parsed.values.grant !== undefined && !grant) throw new UsageError('The grant is empty.', 'Pass the grant from your PeerBand dashboard: --grant GRANT.');
-    const previous = await loadCredentials(credentialsFile(ctx)).catch(() => undefined);
-    const previousCredential = reusableCredential(previous, serverUrl);
-    const credentials = grant
-      ? await loginWithGrant(ctx, { serverUrl, grant, name, ...(previousCredential ? { previousCredential } : {}) })
-      : await loginWithBrowser(ctx, { serverUrl, name, noBrowser: parsed.values['no-browser'] === true, ...(previousCredential ? { previousCredential } : {}) });
-    const s = ctx.out.stdout;
-    if (previous && previous.installationId === credentials.installationId && previous.serverUrl === credentials.serverUrl)
-      ctx.out.print(s.dim('Kept this machine in your account with a new credential; its shares stay in place.'));
-    else if (previous) ctx.out.print(s.dim(`Replaced the previous login (${previous.machineName ?? previous.installationId} on ${previous.serverUrl}).`));
-    const who = credentials.accountEmail ? ` (${credentials.accountEmail})` : '';
-    ctx.out.print(`${s.green(symbols.ok)} Logged in as ${s.bold(credentials.machineName ?? name)}${who}`);
+    const herdrMode = herdrPluginMode(parsed);
+    await signIn(parsed, ctx);
     await herdrSetup(ctx, herdrMode);
     ctx.out.print('');
     printSkillTip(ctx);
     return 0;
   },
 };
+
+/** The --herdr-plugin value (ask by default). */
+export function herdrPluginMode(parsed: Parsed): HerdrPluginMode {
+  const rawMode = str(parsed, 'herdr-plugin')?.trim().toLowerCase() ?? 'ask';
+  if (!(HERDR_PLUGIN_MODES as readonly string[]).includes(rawMode)) throw new UsageError(`Invalid --herdr-plugin value "${rawMode}".`, 'Use --herdr-plugin ask, install or skip.');
+  return rawMode as HerdrPluginMode;
+}
+
+/** Signs in with --grant (or PEERBAND_GRANT) or through the browser, stores the credential and says who is logged in. */
+export async function signIn(parsed: Parsed, ctx: Ctx): Promise<Credentials> {
+  const serverUrl = resolveServerUrl(str(parsed, 'server'), ctx.env);
+  const name = str(parsed, 'name')?.trim() || hostname();
+  // The grant is a secret: never leave it in this process environment or in child environments.
+  const grant = (str(parsed, 'grant') ?? ctx.env.PEERBAND_GRANT)?.trim();
+  delete ctx.env.PEERBAND_GRANT;
+  if (parsed.values.grant !== undefined && !grant) throw new UsageError('The grant is empty.', 'Pass the grant from your PeerBand dashboard: --grant GRANT.');
+  const previous = await loadCredentials(credentialsFile(ctx)).catch(() => undefined);
+  const previousCredential = reusableCredential(previous, serverUrl);
+  const credentials = grant
+    ? await loginWithGrant(ctx, { serverUrl, grant, name, ...(previousCredential ? { previousCredential } : {}) })
+    : await loginWithBrowser(ctx, { serverUrl, name, noBrowser: parsed.values['no-browser'] === true, ...(previousCredential ? { previousCredential } : {}) });
+  const s = ctx.out.stdout;
+  if (previous && previous.installationId === credentials.installationId && previous.serverUrl === credentials.serverUrl)
+    ctx.out.print(s.dim('Kept this machine in your account with a new credential; its shares stay in place.'));
+  else if (previous) ctx.out.print(s.dim(`Replaced the previous login (${previous.machineName ?? previous.installationId} on ${previous.serverUrl}).`));
+  const who = credentials.accountEmail ? ` (${credentials.accountEmail})` : '';
+  ctx.out.print(`${s.green(symbols.ok)} Logged in as ${s.bold(credentials.machineName ?? name)}${who}`);
+  return credentials;
+}

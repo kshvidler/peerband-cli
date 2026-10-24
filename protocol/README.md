@@ -22,7 +22,7 @@ The grant flow (`enrollment-redeem.schema.json`) remains available for headless 
 ## Relay summary
 
 1. The client opens `wss://<server>/connections` with `Authorization: Bearer <installation credential>` (never in the URL). Plain `ws://` is only accepted for loopback hosts.
-2. The server sends `request` frames (`id`, `tool`, `args`, `principal`). The client runs them through its local policy layer (allow-lists, write opt-in, output sanitization, idempotent receipts) and answers with a `response` carrying exactly one of `result` or `error {code, message, next_step}`.
+2. The server sends `request` frames (`id`, `tool`, `args`, `principal`). The client runs them through its local policy layer (allow-lists, write opt-in, output sanitization, idempotent receipts) and answers with a `response` carrying exactly one of `result` or `error {code, message, next_step}`. `principal` is `{id, scopes, role, email}`: `role` is `owner` or `guest` (a shared user) and `email` is the caller's account email when known. The client starts every message it delivers to an agent with a `[PeerBand relay]` line naming the sender from these fields; a missing role counts as a guest.
 3. The server sends `ping` after 20 s of silence; the client replies `pong`. The client closes the socket with code 4000 and reconnects if it hears nothing from the server for 75 s.
 4. Limits: 64 KiB per frame, 32 outstanding requests, 15 s per request. Requests are never replayed; a write whose response is lost is reported as `delivery_unknown`.
 5. Close codes 4001 (replaced), 4003, 4401 (auth) and HTTP 401/403 on upgrade mean the credential is revoked or superseded: the client stops reconnecting.

@@ -38,7 +38,9 @@
           "required": ["id", "scopes"],
           "properties": {
             "id": { "type": "string" },
-            "scopes": { "type": "array", "items": { "type": "string" } }
+            "scopes": { "type": "array", "items": { "type": "string" } },
+            "role": { "enum": ["owner", "guest"], "description": "owner: the caller owns this machine; guest: the caller reaches it through a share. The client treats a missing or unknown role as guest when it labels delivered messages." },
+            "email": { "type": "string", "description": "The caller's account email, when the server knows it. Omitted otherwise." }
           }
         }
       },

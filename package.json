@@ -10,7 +10,7 @@
   "keywords": ["peerband", "herdr", "mcp", "coding-agents", "cli"],
   "bin": { "peerband": "dist/peerband.mjs" },
   "engines": { "node": ">=22.13.0" },
-  "files": ["dist/", "herdr/", "herdr-plugin.toml", "protocol/", "install/", "README.md", "LICENSE", "NOTICE", "SECURITY.md"],
+  "files": ["dist/", "herdr/", "herdr-plugin.toml", "protocol/", "install/", "skills/", "README.md", "LICENSE", "NOTICE", "SECURITY.md"],
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
