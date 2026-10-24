@@ -77,9 +77,9 @@ async function fakeHerdr(options: { rejectSubscribe?: string } = {}) {
 
 async function startAdapter(herdr: Awaited<ReturnType<typeof fakeHerdr>>) {
   const logs: string[] = [];
-  const adapter = new HerdrAdapter({ schemaPath: fixture, socketPath: herdr.socketPath, log: (message) => logs.push(message), events: { settleMs: 10, listSettleMs: 10, sleep: (ms) => pause(Math.min(ms, 20)), random: () => 0 } });
+  const adapter = new HerdrAdapter({ schemaPath: fixture, socketPath: herdr.socketPath, events: { settleMs: 10, listSettleMs: 10, sleep: (ms) => pause(Math.min(ms, 20)), random: () => 0 } });
   const events: RuntimeEvent[] = [];
-  const stop = adapter.onEvent((event) => events.push(event));
+  const stop = adapter.onEvent((event) => events.push(event), (message) => logs.push(message));
   cleanups.push(async () => { stop(); await adapter.close(); });
   await eventually(() => herdr.subscribers.length === 1, 'the first subscription');
   return { adapter, events, logs };
@@ -145,8 +145,8 @@ describe('Herdr agent events', () => {
   it('logs once and runs without events when Herdr rejects the subscription', async () => {
     const herdr = await fakeHerdr({ rejectSubscribe: 'invalid_request' });
     const logs: string[] = [];
-    const adapter = new HerdrAdapter({ schemaPath: fixture, socketPath: herdr.socketPath, log: (message) => logs.push(message), events: { sleep: () => pause(5), random: () => 0 } });
-    const stop = adapter.onEvent(() => undefined);
+    const adapter = new HerdrAdapter({ schemaPath: fixture, socketPath: herdr.socketPath, events: { sleep: () => pause(5), random: () => 0 } });
+    const stop = adapter.onEvent(() => undefined, (message) => logs.push(message));
     cleanups.push(async () => { stop(); await adapter.close(); });
     await eventually(() => logs.length > 0, 'a log line');
     await pause(150);

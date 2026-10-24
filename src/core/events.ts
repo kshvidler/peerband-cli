@@ -80,6 +80,8 @@ export interface ConnectorEventsOptions {
   /** Notes per minute (burst and refill). Default 10. */
   notesPerMinute?: number;
   now?: () => number;
+  /** One-line notices from the runtime's event stream (for example when it has no event support). */
+  log?: (message: string) => void;
 }
 
 export interface NotifyResult { sent: boolean; agentId: string | null; eventId?: string }
@@ -97,6 +99,7 @@ export class ConnectorEvents implements RelayEventChannel {
   private readonly burst: number;
   private readonly notesPerMinute: number;
   private readonly now: () => number;
+  private readonly log?: (message: string) => void;
   private send?: FrameSender;
   private unsubscribe?: () => void;
   private readonly pending = new Map<string, Record<string, unknown>>();
@@ -118,6 +121,7 @@ export class ConnectorEvents implements RelayEventChannel {
     this.burst = options.burst ?? 20;
     this.notesPerMinute = options.notesPerMinute ?? 10;
     this.now = options.now ?? Date.now;
+    this.log = options.log;
     this.tokens = this.burst;
     this.noteTokens = this.notesPerMinute;
     this.refilledAt = this.noteRefilledAt = this.now();
@@ -126,7 +130,7 @@ export class ConnectorEvents implements RelayEventChannel {
   /** Starts listening to the runtime. Runtimes without events are fine: only notes are sent then. */
   start(): void {
     if (this.unsubscribe || !this.adapter.onEvent) return;
-    this.unsubscribe = this.adapter.onEvent((event) => this.push(event));
+    this.unsubscribe = this.adapter.onEvent((event) => this.push(event), this.log);
   }
 
   close(): void {

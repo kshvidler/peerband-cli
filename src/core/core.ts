@@ -47,8 +47,8 @@ export interface RuntimeAdapter {
   sendMessage(id: string, message: string): Promise<void>;
   getCapabilities(): Capabilities;
   close?(): Promise<void>;
-  /** Agent status and list-change events (metadata only). Returns an unsubscribe function. */
-  onEvent?(listener: RuntimeEventListener): () => void;
+  /** Agent status and list-change events (metadata only). `log` receives one-line notices. Returns an unsubscribe function. */
+  onEvent?(listener: RuntimeEventListener, log?: (message: string) => void): () => void;
   /** Maps a runtime pane id (for example HERDR_PANE_ID) to the agent id list_agents reports. */
   agentIdForPane?(paneId: string): Promise<string | undefined>;
 }

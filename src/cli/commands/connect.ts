@@ -141,11 +141,7 @@ export async function connect(options: ConnectOptions, ctx: Ctx): Promise<number
   const s = ctx.out.stderr;
   const machine = describeMachine(credentials);
 
-  const eventLog = (message: string) => { if (!managed) ctx.out.warn(s.dim(`  ${sanitize(message)}`)); };
-  const adapter: RuntimeAdapter = runtime === 'mock' ? new MockRuntime() : new HerdrAdapter({ ...(config.herdr ?? {}), log: eventLog });
-  // Agent status events (metadata only) stream to PeerBand while the relay is connected.
-  const events = new ConnectorEvents(adapter, { allowedAgents: config.allowedAgents, allowedWorkspaces: config.allowedWorkspaces });
-  const stopMockCycle = adapter instanceof MockRuntime ? startMockStatusCycle(adapter, ctx.env) : () => undefined;
+  const adapter: RuntimeAdapter = runtime === 'mock' ? new MockRuntime() : new HerdrAdapter(config.herdr ?? {});
   const core = new ConnectorCore(adapter, {
     writesEnabled: enableWrites,
     allowedAgents: config.allowedAgents,
@@ -155,6 +151,14 @@ export async function connect(options: ConnectOptions, ctx: Ctx): Promise<number
     lockIsStale: async (lockDir, ownerFile) => (await inspectLock({ lockDir, ownerFile, processPattern: CONNECTOR_PATTERN })).state === 'stale',
     onLockReclaimed: (message) => ctx.out.warn(ctx.out.stderr.dim(`peerband: ${message}`)),
   });
+
+  // Agent status events (metadata only) stream to PeerBand while the relay is connected.
+  const events = new ConnectorEvents(adapter, {
+    allowedAgents: config.allowedAgents,
+    allowedWorkspaces: config.allowedWorkspaces,
+    log: (message) => { if (!managed) ctx.out.warn(s.dim(`  ${sanitize(message)}`)); },
+  });
+  const stopMockCycle = adapter instanceof MockRuntime ? startMockStatusCycle(adapter, ctx.env) : () => undefined;
 
   const abort = new AbortController();
   let signalled: NodeJS.Signals | undefined;

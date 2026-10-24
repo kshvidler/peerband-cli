@@ -13,8 +13,6 @@ export interface HerdrAdapterOptions {
   binary?: string;
   machineId?: string;
   timeoutMs?: number;
-  /** One-line notices from the event stream (for example when Herdr has no event support). */
-  log?: (message: string) => void;
   /** Test seams for the event stream. */
   events?: Omit<HerdrEventBridgeOptions, 'log'>;
 }
@@ -98,7 +96,7 @@ export class HerdrAdapter implements RuntimeAdapter {
   }
 
   /** Status and list-change events from Herdr's events.subscribe (metadata only, never pane text). */
-  onEvent(listener: RuntimeEventListener): () => void {
+  onEvent(listener: RuntimeEventListener, log?: (message: string) => void): () => void {
     this.bridge ??= new HerdrEventBridge({
       prepare: async () => {
         const { schema } = await this.initialize();
@@ -114,7 +112,7 @@ export class HerdrAdapter implements RuntimeAdapter {
         const record = this.records.get(live.id);
         return { paneId: live.agent.pane_id, agentId: live.id, status: record?.status ?? 'unknown', label: record?.label ?? 'Herdr agent', workspace: record?.workspace ?? live.agent.workspace_id, revision: live.agent.revision };
       }),
-    }, { ...this.options.events, log: this.options.log });
+    }, { ...this.options.events, log });
     return this.bridge.subscribe(listener);
   }
 
