@@ -1,7 +1,9 @@
 import { CONNECTOR_PATTERN, inspectLock } from '../herdr-js.js';
 import { resolve } from 'node:path';
 import {
+  ConnectError,
   ConnectorCore,
+  ConnectorEvents,
   MockRuntime,
   receiptsPath,
   runRemoteClient,
@@ -96,6 +98,27 @@ export interface ConnectOptions {
   managed?: boolean;
 }
 
+/** `{type: "peerband:notify", id, text, paneId?}` from the plugin supervisor (`peerband notify`). */
+function notifyRequest(message: unknown): { id: string; text: unknown; paneId?: unknown } | undefined {
+  if (!message || typeof message !== 'object' || Array.isArray(message)) return undefined;
+  const value = message as Record<string, unknown>;
+  if (value.type !== 'peerband:notify' || typeof value.id !== 'string' || value.id.length > 128) return undefined;
+  return { id: value.id, text: value.text, paneId: value.paneId };
+}
+
+/** Test and demo seam: with PEERBAND_MOCK_STATUS_INTERVAL_MS the mock runtime flips its first agent's status. */
+function startMockStatusCycle(adapter: MockRuntime, env: NodeJS.ProcessEnv): () => void {
+  const interval = Number(env.PEERBAND_MOCK_STATUS_INTERVAL_MS);
+  if (!Number.isSafeInteger(interval) || interval < 50) return () => undefined;
+  const timer = setInterval(() => {
+    void adapter.listAgents().then(([first]) => {
+      if (first) adapter.setStatus(first.id, first.status === 'working' ? 'idle' : 'working');
+    });
+  }, interval);
+  timer.unref();
+  return () => clearInterval(timer);
+}
+
 function isShutdownMessage(message: unknown): boolean {
   return (
     Boolean(message) &&
@@ -130,6 +153,14 @@ export async function connect(options: ConnectOptions, ctx: Ctx): Promise<number
     onLockReclaimed: (message) => ctx.out.warn(ctx.out.stderr.dim(`peerband: ${message}`)),
   });
 
+  // Agent status events (metadata only) stream to PeerBand while the relay is connected.
+  const events = new ConnectorEvents(adapter, {
+    allowedAgents: config.allowedAgents,
+    allowedWorkspaces: config.allowedWorkspaces,
+    log: (message) => { if (!managed) ctx.out.warn(s.dim(`  ${sanitize(message)}`)); },
+  });
+  const stopMockCycle = adapter instanceof MockRuntime ? startMockStatusCycle(adapter, ctx.env) : () => undefined;
+
   const abort = new AbortController();
   let signalled: NodeJS.Signals | undefined;
   const onSignal = (signal: NodeJS.Signals) => {
@@ -141,6 +172,20 @@ export async function connect(options: ConnectOptions, ctx: Ctx): Promise<number
   const onDisconnect = () => abort.abort();
   const onMessage = (message: unknown) => {
     if (isShutdownMessage(message)) abort.abort();
+    const notify = notifyRequest(message);
+    if (notify) {
+      void events.notify(notify).then(
+        (result) => process.send?.({ type: 'peerband:notify-result', id: notify.id, ok: true, ...result }),
+        (error: unknown) => process.send?.({
+          type: 'peerband:notify-result',
+          id: notify.id,
+          ok: false,
+          code: error instanceof ConnectError ? error.code : 'runtime_error',
+          message: error instanceof ConnectError ? error.message : 'The note could not be sent.',
+          nextStep: error instanceof ConnectError ? error.nextStep : undefined,
+        }),
+      );
+    }
   };
   process.once('SIGINT', onSigint);
   process.once('SIGTERM', onSigterm);
@@ -162,6 +207,7 @@ export async function connect(options: ConnectOptions, ctx: Ctx): Promise<number
   };
   try {
     await core.initialize();
+    events.start();
     if (!managed) {
       ctx.out.warn(
         `${s.bold('peerband')} ${s.dim(`${runtime} runtime, ${enableWrites ? 'messages allowed' : 'read-only'}. Press Ctrl+C to stop.`)}`,
@@ -169,6 +215,7 @@ export async function connect(options: ConnectOptions, ctx: Ctx): Promise<number
     }
     await runRemoteClient(core, credentials, {
       signal: abort.signal,
+      events,
       onStatus: (message) => {
         // Routine relay notices (e.g. "remote connection established"), not warnings.
         if (!managed) ctx.out.warn(s.dim(`  ${sanitize(message)}`));
@@ -197,6 +244,8 @@ export async function connect(options: ConnectOptions, ctx: Ctx): Promise<number
     process.off('SIGTERM', onSigterm);
     process.off('message', onMessage);
     process.off('disconnect', onDisconnect);
+    stopMockCycle();
+    events.close();
     await core.close();
     await adapter.close?.();
     if (ipc && process.connected) process.disconnect();

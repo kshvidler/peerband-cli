@@ -99,6 +99,7 @@ The plugin adds a persistent tab titled `PeerBand Relay [On]` or `[Off]` that sh
 | `peerband relay` | Open or focus the Relay tab in Herdr. If the plugin is missing the wrong version, a local checkout, or points at another config directory, it offers to repair it first |
 | `peerband skill` | Install or update the PeerBand agent skill for every coding agent on this machine (through `npx skills add`, falling back to a copy). Keeps a skill you edited unless `--force`; `--copy` skips npx |
 | `peerband share` | Create a single-use invite link that shares this machine with another PeerBand user (read only; `--message` also allows messages; `--expires DAYS`, default 7). `share list` shows who has access and unused links; `share revoke ID` removes access or cancels a link |
+| `peerband notify "<text>"` | From inside a Herdr pane: send the machine owner a short note (1 to 1024 characters) through the running relay, for example when a long task finished or an agent is blocked on a decision. The note names the agent in that pane. `--json` for machine-readable output |
 | `peerband herdr install` | Install (or update) the Herdr plugin. Stops the relay and closes its tab first, puts the previous plugin back if the new one fails, and reopens the tab afterwards |
 | `peerband herdr uninstall` | Stop the relay, close its tab, remove the plugin and its `settings.json`, and delete the local relay state and stale locks (your login is kept) |
 | `peerband --version`, `help [command]` | Version and help |
@@ -131,6 +132,24 @@ Optional `connector.json`:
 
 All fields are optional. `enableWrites` defaults to `true`; set it to `false` to make this machine read-only (the same as `peerband connect --read-only`; it also applies to the Relay tab). `allowedAgents` and `allowedWorkspaces` restrict what MCP clients can see; `stateDirectory` moves the receipt store (default `state/` in the config home). The `herdr` block is only needed when Herdr is not on `PATH` or you target a specific session.
 
+## Agent events and notes
+
+While the relay is connected, the connector tells PeerBand when one of your agents changes state, so the dashboard and MCP clients can read an agent's output when something happened instead of polling it every few seconds (each read makes the Herdr pane jump). It subscribes to Herdr's socket events (`events.subscribe`: agent status changes, and agents appearing or exiting) and sends small `event` frames over the existing relay connection:
+
+- `agent.status_changed`: agent id, new and previous status (`idle`, `working`, `blocked`, `done`, `unknown`), label, workspace and revision, exactly as `list_agents` reports them.
+- `agents.changed`: agents appeared, exited or changed occupant; clients list agents again. Also sent once after every reconnect.
+- `agent.notified`: a note sent with `peerband notify`.
+
+Events are metadata only: they never contain terminal output. Bursts are coalesced (at most one status event per agent every 250 ms) and the overall rate is capped. Nothing is queued while the relay is offline. `allowedAgents` and `allowedWorkspaces` in `connector.json` apply to events too. If Herdr does not support event subscriptions, the connector logs it once and works as before.
+
+Agents can report back on their own with `peerband notify`:
+
+```sh
+peerband notify "Migration finished, 3 tests failing"
+```
+
+The note goes to the machine owner only (never to people you shared the machine with). Control characters are removed and likely secrets are redacted, best effort, like agent output. It needs the Relay tab's helper to be running and connected; a note sent while it is offline fails with an error instead of being queued. The [agent skill](#agent-skill) tells agents when to use it. The wire format is in [protocol/](protocol/README.md).
+
 ## Agent skill
 
 The PeerBand skill (`skills/peerband/SKILL.md`) does two things for your coding agents (Claude Code, Codex, Cursor, Gemini CLI, OpenCode and others):
@@ -154,7 +173,7 @@ This installs the copy shipped with your CLI version through the [`skills`](http
 - **Outbound only.** The connector dials the relay over a WebSocket; it opens no listening port.
 - **Credential on disk** is stored in `credentials.json`, readable only by your user (mode 0600 inside a 0700 directory).
 - **Messaging is on by default, gated by consent.** An MCP client can call `send_agent_message` only if you approved the `agents:message` scope when you connected it (reading needs only the read scope). Each send needs an idempotency key. A machine can opt out entirely with `peerband connect --read-only` or `"enableWrites": false` in `connector.json`; `peerband status` and the Relay tab show which mode it is in.
-- **Metadata-only activity.** The Relay tab and receipts record what happened (tool, target, outcome), not prompts or output.
+- **Metadata-only activity.** The Relay tab and receipts record what happened (tool, target, outcome), not prompts or output. Agent status events carry the same kind of metadata (status, label, workspace), never output; `peerband notify` notes are sanitized and addressed to the machine owner only.
 - **Logout does not revoke.** `peerband logout` only deletes the local file. To revoke a machine, remove it in the PeerBand dashboard.
 
 Agent output can contain secrets, and redaction is best effort. See [SECURITY.md](SECURITY.md) to report a vulnerability.

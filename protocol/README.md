@@ -6,7 +6,7 @@ The `peerband` client talks to the PeerBand service over two interfaces. The ser
 | --- | --- |
 | `enrollment-redeem.schema.json` | `POST /api/enrollments/redeem`: exchange a short-lived grant (from the PeerBand dashboard) for an installation credential. `$defs`: `request`, `response`, `errorResponse`. |
 | `device-authorization.schema.json` | Browser sign-in: `POST /api/device/code` and `POST /api/device/token` (what `peerband login` sends and receives), plus the dashboard approval endpoints. `$defs`: `codeRequest`, `codeResponse`, `tokenRequest`, `tokenResponse`, `tokenError`, `rateLimited`, `requestStatus`, `decisionResponse`. |
-| `relay-messages.schema.json` | Every WebSocket text frame on `wss://<server>/connections`, both directions, as a `oneOf` discriminated by `type`: `request`, `ping` (server to client), `pong`, `response` (client to server). |
+| `relay-messages.schema.json` | Every WebSocket text frame on `wss://<server>/connections`, both directions, as a `oneOf` discriminated by `type`: `request`, `ping` (server to client), `pong`, `response`, `event` (client to server). |
 
 ## Device login summary
 
@@ -26,11 +26,16 @@ The grant flow (`enrollment-redeem.schema.json`) remains available for headless 
 3. The server sends `ping` after 20 s of silence; the client replies `pong`. The client closes the socket with code 4000 and reconnects if it hears nothing from the server for 75 s.
 4. Limits: 64 KiB per frame, 32 outstanding requests, 15 s per request. Requests are never replayed; a write whose response is lost is reported as `delivery_unknown`.
 5. Close codes 4001 (replaced), 4003, 4401 (auth) and HTTP 401/403 on upgrade mean the credential is revoked or superseded: the client stops reconnecting.
+6. Agent events: the client sends `x-peerband-features: events` on the upgrade and then pushes `event` frames (`eventId`, `name`, `timestamp`, `data`) without being asked:
+   - `agent.status_changed` `{agentId, status, previousStatus, label, workspace, revision}` when an agent's status changes (at most one per agent per 250 ms, latest wins, with an overall rate cap);
+   - `agents.changed` `{}` when agents appear, exit or change occupant, and once after every (re)connect, so consumers re-list;
+   - `agent.notified` `{agentId, text, audience: "owner"}` for a note sent with `peerband notify` (1 to 1024 characters, sanitized and redacted like agent output).
+   Events are metadata only and never carry terminal output. They are sent only while the socket is open; nothing is queued while disconnected.
 
 The client only reports metadata (tool, target id, outcome, latency) to its local activity log; message bodies and agent output are never logged.
 
 ## Versioning
 
-The protocol has no explicit version field today. Changes are additive: new optional fields and new `tool` values may appear, so implementations must ignore unknown fields on received messages. A breaking change would use a new endpoint path or a `hello` negotiation message and be documented here with a bump of the schema `$id`. Schemas are published with each client release in `protocol/`.
+The protocol has no explicit version field today. Changes are additive: new optional fields, new `tool` values and new frame types may appear, so implementations must ignore unknown fields and unknown frame types on received messages. The `event` frame is such an addition: servers that do not know it ignore it, and the `x-peerband-features` upgrade header tells servers that do which clients emit events. A breaking change would use a new endpoint path or a `hello` negotiation message and be documented here with a bump of the schema `$id`. Schemas are published with each client release in `protocol/`.
 
 The tests in `test/protocol.test.ts` validate messages produced by the real relay client against these schemas.

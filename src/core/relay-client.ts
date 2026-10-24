@@ -3,6 +3,7 @@ import { isIP } from "node:net";
 import WebSocket from "ws";
 import type { ConnectorCore, Principal } from "./core.js";
 import type { RemoteCredentials } from "./config.js";
+import type { EventFrame, RelayEventChannel } from "./events.js";
 
 const MAX_FRAME = 64 * 1024;
 const MAX_ACTIVE = 32;
@@ -117,6 +118,8 @@ export type RemoteOptions = {
   sleep?: (ms: number) => Promise<void>;
   signal?: AbortSignal;
   heartbeatTimeoutMs?: number;
+  /** Agent events to stream while connected; also announces `x-peerband-features: events` on the upgrade. */
+  events?: RelayEventChannel;
 };
 
 /** Keeps one authenticated socket alive; in-flight backend requests are never replayed. */
@@ -155,7 +158,10 @@ export async function runRemoteClient(
         setConnectionState("connecting");
         await new Promise<void>((resolve, reject) => {
           const socket = new WebSocket(serverUrl, {
-            headers: { Authorization: `Bearer ${credentials.credential}` },
+            headers: {
+              Authorization: `Bearer ${credentials.credential}`,
+              ...(options.events ? { "x-peerband-features": "events" } : {}),
+            },
             maxPayload: MAX_FRAME,
             handshakeTimeout: 10_000,
             perMessageDeflate: false,
@@ -190,6 +196,7 @@ export async function runRemoteClient(
               Math.min(10_000, Math.max(10, heartbeatTimeoutMs / 4)),
             );
             heartbeatTimer.unref();
+            options.events?.attach((frame: EventFrame) => sendEvent(socket, frame));
           });
           socket.on("message", async (data, isBinary) => {
             if (stopped) {
@@ -372,6 +379,7 @@ export async function runRemoteClient(
           });
           socket.once("close", (code, reason) => {
             if (heartbeatTimer) clearInterval(heartbeatTimer);
+            options.events?.detach();
             if (Date.now() - openedAt >= 30_000) attempt = 0;
             if (code === 4001 || code === 4003 || code === 4401) stopped = true;
             if (stopped) setConnectionState("revoked");
@@ -408,6 +416,19 @@ export async function runRemoteClient(
     for (const pending of active.values()) clearTimeout(pending.timer);
     active.clear();
   }
+}
+
+/** Sends an event frame only while this socket is open; events are dropped, never queued. */
+function sendEvent(socket: WebSocket, frame: EventFrame): boolean {
+  if (socket.readyState !== WebSocket.OPEN) return false;
+  let text: string;
+  try {
+    text = encode(frame);
+  } catch {
+    return false;
+  }
+  socket.send(text);
+  return true;
 }
 
 export function makeRequestId(): string {

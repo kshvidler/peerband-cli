@@ -78,3 +78,17 @@ Common errors:
 | `forbidden` | The `installation_id` does not belong to this account | Call `list_machines` and use one of the returned IDs |
 | `runtime_unavailable` | The machine is offline (relay off) or Herdr is not running | Ask the user to start Herdr and run `peerband relay` on that machine |
 | `agent_not_found` | The agent no longer exists or the ID is wrong | Call `list_agents` again |
+
+## Reporting back with `peerband notify` (for agents running in Herdr)
+
+If you are a coding agent running in a Herdr pane on a machine with PeerBand, you can tell the machine owner about something important without anyone polling your output:
+
+```
+peerband notify "Migration finished, 3 tests failing"
+```
+
+- Use it when a long task finished, when you are blocked on a decision only the owner can make, or for an important result. Not for progress updates or routine steps.
+- Keep it short and factual: 1 to 1024 characters, one note per event. Say what happened and what you need, if anything.
+- Never include secrets, credentials, tokens or personal data. Redaction is best effort, not a guarantee.
+- Notes go to the machine owner only, never to people the machine is shared with.
+- The note names your agent automatically (from the pane). It needs the relay to be running and connected; if the command fails ("No PeerBand relay is running", "not connected"), carry on and report the result in your normal output instead of retrying in a loop.
