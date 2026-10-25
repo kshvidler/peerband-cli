@@ -34,6 +34,8 @@ export interface OutputOptions {
 
 export interface OutputResult {
   text: string;
+  /** Set when a history read falls back to the current terminal screen. */
+  source?: 'visible';
   truncated: boolean;
   observedAt: string;
   nextCursor?: string;
@@ -449,7 +451,7 @@ export class ConnectorCore {
     }
     const result = await this.adapter.readOutput(agent.id, options);
     const safe = sanitizeOutput(result.text, options);
-    return { ...safe, observedAt: result.observedAt, truncated: safe.truncated || result.truncated, ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}) };
+    return { ...safe, ...(result.source === 'visible' ? { source: result.source } : {}), observedAt: result.observedAt, truncated: safe.truncated || result.truncated, ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}) };
   }
 
   private async sendMessage(args: Record<string, unknown>, principal: Principal): Promise<Record<string, unknown>> {

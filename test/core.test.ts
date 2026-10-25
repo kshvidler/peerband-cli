@@ -189,6 +189,19 @@ describe('ConnectorCore security and delivery', () => {
       expect(Buffer.byteLength(sanitizeOutput(value, { bytes: 1 }).text)).toBeLessThanOrEqual(1);
     }
   });
+  it('preserves the visible-screen fallback marker through output sanitization', async () => {
+    class VisibleRuntime extends MockRuntime {
+      override async readOutput(): Promise<OutputResult> {
+        return { text: '\u001b[31mCurrent screen\u001b[0m', source: 'visible', truncated: true, observedAt: '2026-10-25T20:00:00Z', untrusted: true };
+      }
+    }
+    const runtime = new VisibleRuntime();
+    const [agent] = await runtime.listAgents();
+    const core = new ConnectorCore(runtime);
+    try {
+      await expect(core.execute('get_agent_output', { agentId: agent!.id }, principal)).resolves.toMatchObject({ text: 'Current screen', source: 'visible', truncated: true, untrusted: true });
+    } finally { await core.close(); }
+  });
 });
 
 class HangingRuntime implements RuntimeAdapter {

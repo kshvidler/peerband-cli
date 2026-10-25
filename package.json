@@ -1,6 +1,6 @@
 {
   "name": "peerband",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "PeerBand CLI and Herdr plugin: reach your local coding agents from any MCP client through your PeerBand account",
   "license": "Apache-2.0",
   "type": "module",

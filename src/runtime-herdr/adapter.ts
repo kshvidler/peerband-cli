@@ -137,17 +137,28 @@ export class HerdrAdapter implements RuntimeAdapter {
     if (!live) throw new ConnectError('stale_target', 'This Herdr agent handle is no longer current.', 'Refresh the agent list and select its current occupant.');
     const lines = clampInteger(options.lines, 80, 1, 500);
     const { client } = await this.initialize();
-    const result = asObject(await client.request('agent.read', {
+    const params = {
       target: live.agent.pane_id,
       source: 'recent',
       format: 'text',
       lines,
       strip_ansi: true,
-    }));
+    };
+    let result: Record<string, unknown>;
+    let visibleOnly = false;
+    try {
+      result = asObject(await client.request('agent.read', params));
+    } catch (error) {
+      if (!(error instanceof ConnectError) || error.code !== 'agent_not_idle') throw error;
+      // Alternate-screen history requires scrolling an idle agent. A visible
+      // read is passive and remains available if the agent becomes busy.
+      result = asObject(await client.request('agent.read', { ...params, source: 'visible' }));
+      visibleOnly = true;
+    }
     if (result.type !== 'pane_read' || !result.read || typeof result.read !== 'object' || typeof (result.read as { text?: unknown }).text !== 'string') throw this.schemaMismatch('agent.read returned an unexpected result type');
     const output = sanitizeOutput((result.read as { text: string }).text, { ...options, lines, bytes: clampInteger(options.bytes, 16_384, 1, 32_768) });
     await this.getAgent(id);
-    return { ...output, truncated: output.truncated || (result.read as { truncated?: boolean }).truncated === true, observedAt: new Date().toISOString(), untrusted: true };
+    return { ...output, ...(visibleOnly ? { source: 'visible' as const } : {}), truncated: visibleOnly || output.truncated || (result.read as { truncated?: boolean }).truncated === true, observedAt: new Date().toISOString(), untrusted: true };
   }
 
   async sendMessage(id: string, message: string): Promise<void> {
