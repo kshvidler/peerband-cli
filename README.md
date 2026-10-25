@@ -1,13 +1,48 @@
-# PeerBand
+<p align="center">
+  <a href="https://peerband.com">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/kshvidler/peerband-cli/main/docs/assets/peerband-logo-dark.svg">
+      <img src="https://raw.githubusercontent.com/kshvidler/peerband-cli/main/docs/assets/peerband-logo.svg" alt="PeerBand" width="72" height="72">
+    </picture>
+  </a>
+</p>
 
-**A direct line to your coding agents.** PeerBand lets you reach the agents running in [Herdr](https://herdr.dev) from any MCP client (Claude, ChatGPT, your own tools) through your PeerBand account. This repository is the open-source client: the `peerband` command-line tool and the Herdr plugin. It runs on your machine and connects out to the PeerBand relay; nothing connects in.
+<h1 align="center">PeerBand</h1>
+
+<p align="center"><strong>A direct line to your local AI agents.</strong></p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/peerband"><img src="https://img.shields.io/npm/v/peerband?color=111&label=npm" alt="npm version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-111" alt="Apache-2.0 license"></a>
+  <img src="https://img.shields.io/badge/node-%E2%89%A522.13-111" alt="Node.js 22.13 or newer">
+</p>
+
+<p align="center">
+  <a href="https://peerband.com">Website</a> ·
+  <a href="https://peerband.com/guide">Guide</a> ·
+  <a href="https://peerband.com/docs">Docs</a> ·
+  <a href="https://peerband.com/dashboard">Dashboard</a>
+</p>
+
+PeerBand connects ChatGPT, Claude or any MCP client to the coding agents (Claude Code, Codex, Gemini CLI, OpenCode and others) running in [Herdr](https://herdr.dev) on your machine. Ask what they're doing, send the next instruction, share access with a teammate, and get a note in Slack, Discord or your own endpoint when an agent needs you.
+
+This repository is the open-source client: the `peerband` command-line tool and the Herdr plugin. It runs on your machine and connects out to the PeerBand relay; nothing connects in.
 
 ```
 MCP client --> PeerBand relay <== outbound WebSocket == peerband connector --> Herdr
- (Claude, ...)  (peerband.com)                          (on your machine)     (your agents)
+ (ChatGPT, Claude)  (peerband.com)                       (on your machine)     (your agents)
 ```
 
-Your MCP client can list agents, read their status and bounded recent output, and send them a message (sending needs your approval of the `agents:message` permission when you connect the client, and a machine can opt out; see [Security model](#security-model)). This project is unofficial and is not affiliated with Herdr or Amazon.
+## What you can do
+
+- **Check in from anywhere.** Add one URL to ChatGPT, Claude or Claude Code and ask what your agents are doing. Your client lists agents and reads their status and bounded recent output.
+- **Send the next instruction.** Messages go to an explicit agent, only with your consent (`agents:message`), and every message tells the agent who sent it.
+- **Share a machine.** `peerband share` creates an invite link for a teammate or a review bot: read only, or read and message. Your agent treats guests as coworkers.
+- **Get told when an agent needs you.** Agents send you notes with `peerband notify`. Webhooks deliver status changes and notes to Slack, Discord, or your own endpoint, signed with [Standard Webhooks](https://www.standardwebhooks.com). Send a note to one webhook with `--channel`.
+- **No polling.** The connector streams agent status changes, so the dashboard and MCP clients read output only when something changed. `wait_for_agent` waits for an agent to finish or block without reading its output.
+- **Safe by default.** Outbound connection only, metadata-only activity logs, one switch to make a machine read only, and best-effort secret redaction.
+
+This project is unofficial and is not affiliated with Herdr or Amazon.
 
 ## Requirements
 
@@ -56,6 +91,21 @@ No browser available? Pass a one-time grant from the PeerBand dashboard instead:
 
 1. `npm install -g peerband && peerband setup`. Confirm the code shown in your terminal when your browser opens, and press Enter to accept the Herdr plugin and the agent skill. Setup then opens the PeerBand Relay tab; press Space there if it is not connected yet.
 2. Add the MCP server URL that `peerband setup`, `peerband relay` and `peerband status` print (`https://mcp.peerband.com/mcp`) to your MCP client: a custom connector in ChatGPT or Claude, or `claude mcp add --transport http peerband https://mcp.peerband.com/mcp` in Claude Code. Sign in and approve access when the client asks.
+3. Ask your client something like "What are my agents doing?".
+
+## MCP tools
+
+| Tool | Scope | What it does |
+| --- | --- | --- |
+| `list_machines` | `agents:read` | Your machines (and machines shared with you), their installation IDs and whether each is online. Call it first |
+| `list_agents` | `agents:read` | The agents on a machine, with status, label and workspace |
+| `get_agent_status` | `agents:read` | The status of one agent: `idle`, `working`, `blocked`, `done` or `unknown` |
+| `get_agent_output` | `agents:read` | A bounded excerpt of an agent's recent output |
+| `wait_for_agent` | `agents:read` | Wait up to 50 seconds for an agent to reach a status (default: idle, blocked or done), without polling or reading output |
+| `send_agent_message` | `agents:message` | Send a message to an explicit agent ID. Fails with `write_disabled` on a read-only machine |
+| `get_request_status` | `agents:read` | The delivery receipt of an earlier message |
+
+The agent tools take an optional `installation_id`; it can be left out when you have one machine, or exactly one online. Clients that support MCP Events can subscribe to agent status changes and notes instead of waiting. Full reference: [peerband.com/docs](https://peerband.com/docs#tools).
 
 ## Logging in
 
@@ -150,6 +200,16 @@ peerband notify "Migration finished, 3 tests failing"
 ```
 
 The note goes to the machine owner only (never to people you shared the machine with). Control characters are removed and likely secrets are redacted, best effort, like agent output. It needs the Relay tab's helper to be running and connected; a note sent while it is offline fails with an error instead of being queued. The [agent skill](#agent-skill) tells agents when to use it. The wire format is in [protocol/](protocol/README.md).
+
+### Webhooks
+
+Add webhooks in the PeerBand dashboard under Webhooks. Each one has a name, an HTTPS URL, a format and a filter:
+
+- **Formats.** `slack` and `discord` post a one-line message to an incoming webhook. `standard` posts a JSON envelope signed with [Standard Webhooks](https://www.standardwebhooks.com) (`webhook-id`, `webhook-timestamp`, `webhook-signature` headers), so you can verify it with any Standard Webhooks library and the secret shown once when you create the webhook.
+- **Events.** `agent.status_changed` (filter by status, for example only `blocked`), `agent.notified` (notes), `machine.online` and `machine.offline` (held for 30 seconds, so a short network drop pages nobody). The Test button sends `webhook.test`. Webhooks go to the machine owner only, never to people you shared the machine with.
+- **Machines.** All your machines, or a chosen few.
+
+Failed deliveries are retried for about a day with backoff, and the dashboard shows every attempt. Webhook payloads carry metadata and note text only, never terminal output.
 
 ### Channels
 
