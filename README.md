@@ -153,7 +153,7 @@ The note goes to the machine owner only (never to people you shared the machine 
 
 ### Channels
 
-A channel is one of your PeerBand webhooks, addressed by its name: for example a Slack or Discord incoming webhook, or your own endpoint. Add them in the PeerBand dashboard under Webhooks; the webhook's name is the channel name. Without a channel, a note goes to the dashboard and to every webhook that takes notes. With one, it goes to that webhook only:
+A channel is one of your PeerBand webhooks, addressed by its name: for example a Slack or Discord incoming webhook, or your own endpoint. Add them in the PeerBand dashboard under Webhooks; the webhook's name is the channel name. A note always shows in the dashboard. Without a channel, it also goes to every webhook that takes notes; with one, it goes to that one webhook instead (the dashboard shows which channel it was sent to):
 
 ```sh
 peerband channels                                        # channels this machine can use: name, format, state
