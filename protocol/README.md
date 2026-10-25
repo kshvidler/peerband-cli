@@ -34,6 +34,8 @@ The grant flow (`enrollment-redeem.schema.json`) remains available for headless 
 
 The client only reports metadata (tool, target id, outcome, latency) to its local activity log; message bodies and agent output are never logged.
 
+`get_agent_output` normally reads recent terminal history. If Herdr rejects that read with `agent_not_idle`, the client retries once using the current visible screen without scrolling. That result includes the optional field `source: "visible"` and `truncated: true`, so consumers can explain that older history is unavailable in this excerpt. Output limits, sanitization and occupant checks still apply. Other read errors are returned without this retry.
+
 ## Versioning
 
 The protocol has no explicit version field today. Changes are additive: new optional fields, new `tool` values and new frame types may appear, so implementations must ignore unknown fields and unknown frame types on received messages. The `event` frame is such an addition: servers that do not know it ignore it, and the `x-peerband-features` upgrade header tells servers that do which clients emit events. A breaking change would use a new endpoint path or a `hello` negotiation message and be documented here with a bump of the schema `$id`. Schemas are published with each client release in `protocol/`.

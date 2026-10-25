@@ -83,6 +83,43 @@ describe('Herdr socket client', () => {
 });
 
 describe('Herdr adapter identity and write policy', () => {
+  it.each(['working', 'blocked', 'unknown'])('falls back to a bounded visible read for %s agents when history needs idle', async (status) => {
+    const reads: unknown[] = [];
+    const { socketPath } = await fakeSocket((socket) => respond(socket, (request) => {
+      if (request.method === 'ping') return { type: 'pong', version: '0.9.3', protocol: 22 };
+      if (request.method === 'agent.list') return { type: 'agent_list', agents: [agentInfo('terminal-one', status)] };
+      const params = request.params;
+      reads.push(params);
+      if (params?.source === 'recent') return { error: { code: 'agent_not_idle', message: 'History requires idle' } };
+      return paneRead('Current screen', 'visible');
+    }));
+    const adapter = new HerdrAdapter({ schemaPath: fixture, socketPath });
+    try {
+      const [agent] = await adapter.listAgents();
+      const output = await adapter.readOutput(agent!.id, { lines: 80, bytes: 512 });
+      expect(reads).toEqual(['recent', 'visible'].map((source) => ({ target: 'workspace-1-1', source, format: 'text', lines: 80, strip_ansi: true })));
+      expect(output).toMatchObject({ text: 'Current screen', source: 'visible', truncated: true, untrusted: true });
+    } finally { await adapter.close(); }
+  });
+
+  it.each(['success', 'pane_not_found'])('does not retry a history read on %s', async (outcome) => {
+    let reads = 0;
+    const { socketPath } = await fakeSocket((socket) => respond(socket, (request) => {
+      if (request.method === 'ping') return { type: 'pong', version: '0.9.3', protocol: 22 };
+      if (request.method === 'agent.list') return { type: 'agent_list', agents: [agentInfo('terminal-one')] };
+      reads += 1;
+      return outcome === 'success' ? paneRead('History', 'recent') : { error: { code: outcome, message: 'Pane missing' } };
+    }));
+    const adapter = new HerdrAdapter({ schemaPath: fixture, socketPath });
+    try {
+      const [agent] = await adapter.listAgents();
+      const output = adapter.readOutput(agent!.id);
+      if (outcome === 'success') await expect(output).resolves.toMatchObject({ text: 'History', truncated: false });
+      else await expect(output).rejects.toMatchObject({ code: outcome });
+      expect(reads).toBe(1);
+    } finally { await adapter.close(); }
+  });
+
   it('sends only to a unique live named agent', async () => {
     let prompt: unknown;
     const { socketPath } = await fakeSocket((socket) => respond(socket, (request) => {
@@ -182,7 +219,7 @@ async function fakeSocket(onConnection: (socket: import('node:net').Socket) => v
   return { socketPath };
 }
 
-function respond(socket: import('node:net').Socket, result: (request: { id: string; method: string }) => unknown): void {
+function respond(socket: import('node:net').Socket, result: (request: { id: string; method: string; params?: Record<string, unknown> }) => unknown): void {
   let data = '';
   socket.on('data', (chunk) => {
     data += chunk.toString();
@@ -190,9 +227,14 @@ function respond(socket: import('node:net').Socket, result: (request: { id: stri
     data = lines.pop() ?? '';
     for (const line of lines) {
       const request = JSON.parse(line) as { id: string; method: string };
-      socket.write(`${JSON.stringify({ id: request.id, result: result(request) })}\n`);
+      const response = result(request);
+      socket.write(`${JSON.stringify(response && typeof response === 'object' && 'error' in response ? { id: request.id, error: response.error } : { id: request.id, result: response })}\n`);
     }
   });
+}
+
+function paneRead(text: string, source: string): Record<string, unknown> {
+  return { type: 'pane_read', read: { pane_id: 'workspace-1-1', workspace_id: 'workspace-1', tab_id: 'workspace-1:1', source, format: 'text', text, revision: 1, truncated: false } };
 }
 
 function agentInfo(terminalId: string, status = 'working'): Record<string, unknown> {
