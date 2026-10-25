@@ -1,8 +1,8 @@
-import { enrollmentBase, type Credentials } from '../../core/index.js';
+import type { Credentials } from '../../core/index.js';
 import { flag, str } from '../args.js';
 import { sanitize, symbols } from '../output.js';
-import { CliError, type CommandSpec, type Ctx, UsageError } from '../types.js';
-import { requireCredentials } from './shared.js';
+import { type CommandSpec, type Ctx, UsageError } from '../types.js';
+import { installationCall, requireCredentials } from './shared.js';
 
 type Role = 'read' | 'message';
 interface Invite { id: string; role: Role; created_at: string; expires_at: string }
@@ -13,27 +13,8 @@ const roleLabel = (role: Role): string => (role === 'message' ? 'read + message'
 const MAX_EXPIRY_DAYS = 30;
 
 /** Calls this machine's sharing API, authenticated by the installation credential. */
-async function call(ctx: Ctx, credentials: Credentials, method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown): Promise<unknown> {
-  const url = new URL(path, enrollmentBase(credentials.serverUrl));
-  let response: Response;
-  try {
-    response = await ctx.fetch(url, {
-      method,
-      headers: { authorization: `Bearer ${credentials.credential}`, ...(body ? { 'content-type': 'application/json' } : {}) },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-      signal: AbortSignal.timeout(15_000),
-    });
-  } catch (error) {
-    throw new CliError(`Could not reach ${url.origin}: ${(error as Error).message}`, 'Check your network connection and try again.');
-  }
-  if (response.status === 204) return null;
-  const parsed = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-  if (response.ok) return parsed;
-  const detail = typeof parsed.detail === 'string' ? parsed.detail : `HTTP ${response.status}`;
-  if (response.status === 401) throw new CliError("PeerBand rejected this machine's credential (it may have been revoked).", 'Run `peerband login` again to sign in.');
-  if (response.status === 404 && path.endsWith('/sharing') && method === 'GET') throw new CliError("This PeerBand server doesn't support sharing yet.");
-  throw new CliError(sanitize(detail));
-}
+const call = (ctx: Ctx, credentials: Credentials, method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown): Promise<unknown> =>
+  installationCall(ctx, credentials, method, path, body, path.endsWith('/sharing') && method === 'GET' ? "This PeerBand server doesn't support sharing yet." : undefined);
 
 function expiryDays(raw: string | undefined): number | undefined {
   if (raw === undefined) return undefined;

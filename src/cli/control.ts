@@ -20,8 +20,8 @@ export class ControlUnavailable extends Error {
 }
 
 /** Asks the running relay to send an owner-directed note (`peerband notify`). */
-export async function requestNotify(note: { text: string; paneId?: string }, env: NodeJS.ProcessEnv, timeoutMs = 8000): Promise<Record<string, unknown>> {
-  return exchange({ command: 'notify', text: note.text, ...(note.paneId ? { paneId: note.paneId } : {}) }, env, timeoutMs, true);
+export async function requestNotify(note: { text: string; paneId?: string; channel?: string }, env: NodeJS.ProcessEnv, timeoutMs = 8000): Promise<Record<string, unknown>> {
+  return exchange({ command: 'notify', text: note.text, ...(note.paneId ? { paneId: note.paneId } : {}), ...(note.channel ? { channel: note.channel } : {}) }, env, timeoutMs, true);
 }
 
 async function exchange(payload: Record<string, unknown>, env: NodeJS.ProcessEnv, timeoutMs: number, typed = false): Promise<Record<string, unknown>> {

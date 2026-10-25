@@ -98,12 +98,12 @@ export interface ConnectOptions {
   managed?: boolean;
 }
 
-/** `{type: "peerband:notify", id, text, paneId?}` from the plugin supervisor (`peerband notify`). */
-function notifyRequest(message: unknown): { id: string; text: unknown; paneId?: unknown } | undefined {
+/** `{type: "peerband:notify", id, text, paneId?, channel?}` from the plugin supervisor (`peerband notify`). */
+function notifyRequest(message: unknown): { id: string; text: unknown; paneId?: unknown; channel?: unknown } | undefined {
   if (!message || typeof message !== 'object' || Array.isArray(message)) return undefined;
   const value = message as Record<string, unknown>;
   if (value.type !== 'peerband:notify' || typeof value.id !== 'string' || value.id.length > 128) return undefined;
-  return { id: value.id, text: value.text, paneId: value.paneId };
+  return { id: value.id, text: value.text, paneId: value.paneId, channel: value.channel };
 }
 
 /** Test and demo seam: with PEERBAND_MOCK_STATUS_INTERVAL_MS the mock runtime flips its first agent's status. */

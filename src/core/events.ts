@@ -45,6 +45,8 @@ export interface RelayEventChannel {
 }
 
 export const NOTE_MAX_CHARS = 1024;
+/** A channel is one of the owner's webhook endpoints, addressed by its name (`peerband notify --channel`). */
+export const CHANNEL_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const PANE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 
 export function eventFrame(name: EventName, data: Record<string, unknown>, now: Date = new Date()): EventFrame {
@@ -53,6 +55,15 @@ export function eventFrame(name: EventName, data: Record<string, unknown>, now: 
 
 export function codePoints(text: string): number {
   return Array.from(text).length;
+}
+
+/** Validates the optional channel name of a note; undefined means the default (dashboard and every note webhook). */
+export function noteChannel(channel: unknown): string | undefined {
+  if (channel === undefined || channel === null) return undefined;
+  if (typeof channel !== 'string' || !CHANNEL_NAME.test(channel)) {
+    throw new ConnectError('invalid_argument', 'Invalid channel name.', 'Channel names are 1 to 32 lowercase letters, digits or dashes, starting with a letter or digit; see `peerband channels`.');
+  }
+  return channel;
 }
 
 /**
@@ -84,7 +95,7 @@ export interface ConnectorEventsOptions {
   log?: (message: string) => void;
 }
 
-export interface NotifyResult { sent: boolean; agentId: string | null; eventId?: string }
+export interface NotifyResult { sent: boolean; agentId: string | null; eventId?: string; channel?: string }
 
 /**
  * Turns runtime events into relay frames: applies the agent allow-lists, coalesces bursts per agent, caps the
@@ -177,17 +188,20 @@ export class ConnectorEvents implements RelayEventChannel {
   }
 
   /** Sends an owner-directed note. Resolves the calling pane to an agent id when the runtime can. */
-  async notify(input: { text: unknown; paneId?: unknown }): Promise<NotifyResult> {
+  async notify(input: { text: unknown; paneId?: unknown; channel?: unknown }): Promise<NotifyResult> {
     if (!this.adapter.getCapabilities().readOutput) throw new ConnectError('unsupported_capability', 'This connector does not share agent output, so notes are turned off.', 'Use a runtime with output support.');
     const text = cleanNote(input.text);
+    const channel = noteChannel(input.channel);
     const agentId = await this.resolveAgent(input.paneId);
-    if (!this.send) return { sent: false, agentId };
+    // The channel is echoed back so `peerband notify --channel` can tell this relay from one that ignores it.
+    const echo = channel ? { channel } : {};
+    if (!this.send) return { sent: false, agentId, ...echo };
     this.refillNotes();
     if (this.noteTokens < 1) throw new ConnectError('rate_limited', `Too many notes: at most ${this.notesPerMinute} per minute.`, 'Wait a minute, and send one note per important result.');
     this.noteTokens -= 1;
-    const frame = eventFrame('agent.notified', { agentId, text, audience: 'owner' });
+    const frame = eventFrame('agent.notified', { agentId, text, audience: 'owner', ...echo });
     const sent = this.send(frame);
-    return { sent, agentId, ...(sent ? { eventId: frame.eventId } : {}) };
+    return { sent, agentId, ...(sent ? { eventId: frame.eventId } : {}), ...echo };
   }
 
   private async resolveAgent(paneId: unknown): Promise<string | null> {
