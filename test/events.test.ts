@@ -118,6 +118,9 @@ describe('connector events', () => {
     expect(validate({ ...good, data: { agentId: null, text: '', audience: 'owner' } })).toBe(false);
     expect(validate({ ...good, data: { agentId: null, text: 'x'.repeat(1025), audience: 'owner' } })).toBe(false);
     expect(validate({ ...good, data: { agentId: null, text: 'hi', audience: 'everyone' } })).toBe(false);
+    expect(validate({ ...good, data: { agentId: null, text: 'hi', audience: 'owner', channel: 'slack-alerts' } })).toBe(true);
+    for (const channel of ['', 'Slack', '-alerts', 'a'.repeat(33), 'a b', 42])
+      expect(validate({ ...good, data: { agentId: null, text: 'hi', audience: 'owner', channel } }), String(channel)).toBe(false);
     expect(validate({ ...good, name: 'agent.status_changed' })).toBe(false);
     expect(validate(eventFrame('agents.changed', { extra: 1 }))).toBe(false);
     expect(validate({ ...eventFrame('agents.changed', {}), output: 'pane text' })).toBe(false);
@@ -150,6 +153,26 @@ describe('notes', () => {
     expect(result).toMatchObject({ sent: true, agentId: null });
     expect(sent.at(-1)!.data).toEqual({ agentId: null, text: 'hello', audience: 'owner' });
     expect(result.eventId).toBe(sent.at(-1)!.eventId);
+  });
+
+  it('addresses a note to a channel and echoes the channel back', async () => {
+    const validate = await relaySchema();
+    const adapter = new MockRuntime();
+    const events = new ConnectorEvents(adapter);
+    expect(await events.notify({ text: 'hello', channel: 'deploys' })).toEqual({ sent: false, agentId: null, channel: 'deploys' });
+    const sent: EventFrame[] = [];
+    events.attach((frame) => { sent.push(frame); return true; });
+    const result = await events.notify({ text: 'Release is live', channel: 'deploys' });
+    expect(result).toMatchObject({ sent: true, channel: 'deploys', eventId: sent.at(-1)!.eventId });
+    expect(sent.at(-1)!.data).toEqual({ agentId: null, text: 'Release is live', audience: 'owner', channel: 'deploys' });
+    expect(validate(sent.at(-1))).toBe(true);
+    // No channel: the frame and the reply are exactly as before.
+    expect(await events.notify({ text: 'hi', channel: null })).not.toHaveProperty('channel');
+    expect(sent.at(-1)!.data).not.toHaveProperty('channel');
+    for (const channel of ['', 'Deploys', '-x', 'a'.repeat(33), 7]) {
+      await expect(events.notify({ text: 'hi', channel }), String(channel)).rejects.toMatchObject({ code: 'invalid_argument' });
+    }
+    expect(sent).toHaveLength(3);
   });
 
   it('hides agents outside the allow-list and limits the note rate', async () => {

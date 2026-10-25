@@ -172,8 +172,14 @@ async function supervise() {
   function forwardNote(input, reply) {
     const text = input.text;
     const paneId = input.paneId;
+    const channel = input.channel;
     if (typeof text !== "string" || text.length > 4096 || (paneId !== undefined && (typeof paneId !== "string" || paneId.length > 128))) {
       reply({ error: "invalid", message: "The note must be text of at most 1024 characters." }, true);
+      return;
+    }
+    // The connector validates the name; this only bounds what is forwarded.
+    if (channel !== undefined && (typeof channel !== "string" || channel.length > 64)) {
+      reply({ error: "invalid", message: "Invalid channel name." }, true);
       return;
     }
     const current = child;
@@ -188,7 +194,7 @@ async function supervise() {
     }, 5000);
     timer.unref();
     pendingNotes.set(id, { reply, timer });
-    current.send({ type: "peerband:notify", id, text, ...(paneId ? { paneId } : {}) }, (error) => {
+    current.send({ type: "peerband:notify", id, text, ...(paneId ? { paneId } : {}), ...(channel ? { channel } : {}) }, (error) => {
       if (!error || !pendingNotes.delete(id)) return;
       clearTimeout(timer);
       reply({ error: "not-running", message: "The connector is not reachable." }, true);
@@ -201,7 +207,7 @@ async function supervise() {
     clearTimeout(pending.timer);
     const text = (value, max) => (typeof value === "string" ? value.slice(0, max) : undefined);
     pending.reply(message.ok === true
-      ? { ok: true, sent: message.sent === true, agentId: text(message.agentId, 256) ?? null, ...(text(message.eventId, 64) ? { eventId: text(message.eventId, 64) } : {}) }
+      ? { ok: true, sent: message.sent === true, agentId: text(message.agentId, 256) ?? null, ...(text(message.eventId, 64) ? { eventId: text(message.eventId, 64) } : {}), ...(text(message.channel, 64) ? { channel: text(message.channel, 64) } : {}) }
       : { error: text(message.code, 64) ?? "error", message: text(message.message, 512) ?? "The note could not be sent.", ...(text(message.nextStep, 512) ? { nextStep: text(message.nextStep, 512) } : {}) }, true);
   }
   const failNotes = () => {

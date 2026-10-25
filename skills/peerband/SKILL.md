@@ -41,7 +41,7 @@ If your user (the owner, at the keyboard or in an owner-labelled relay message) 
 
 To update later: `peerband update` (updates the CLI from npm, then the Herdr plugin, and restarts the relay; `--check` only reports). If `peerband status` says the plugin version does not match the CLI, run `peerband update`.
 
-Other commands: `peerband login` (log in again), `peerband relay` (open the Relay tab), `peerband skill` (install or update this skill for local agents), `peerband status` (login, relay, plugin health, installation ID), `peerband connect` (run the connector in the foreground; `--read-only` blocks messages), `peerband update` (update the CLI and the plugin), `peerband herdr install` (install or repair the plugin), `peerband share` (invite another PeerBand user to this machine; `share list`, `share revoke ID`), `peerband logout`.
+Other commands: `peerband channels` (the channels `peerband notify --channel` can send to), `peerband login` (log in again), `peerband relay` (open the Relay tab), `peerband skill` (install or update this skill for local agents), `peerband status` (login, relay, plugin health, installation ID), `peerband connect` (run the connector in the foreground; `--read-only` blocks messages), `peerband update` (update the CLI and the plugin), `peerband herdr install` (install or repair the plugin), `peerband share` (invite another PeerBand user to this machine; `share list`, `share revoke ID`), `peerband logout`.
 
 ## MCP tools
 
@@ -92,3 +92,4 @@ peerband notify "Migration finished, 3 tests failing"
 - Never include secrets, credentials, tokens or personal data. Redaction is best effort, not a guarantee.
 - Notes go to the machine owner only, never to people the machine is shared with.
 - The note names your agent automatically (from the pane). It needs the relay to be running and connected; if the command fails ("No PeerBand relay is running", "not connected"), carry on and report the result in your normal output instead of retrying in a loop.
+- **Channels.** The owner can set up channels (their webhooks, such as a Slack channel, each with a name). Every note shows in the owner's dashboard. Without `--channel` it also goes to every webhook that takes notes; that is the right default. With `--channel NAME` it goes to that one webhook instead of all of them. Use `peerband notify --channel NAME "<text>"` only when the owner asked for a specific channel, or a project's instructions name one. Run `peerband channels` to see the names and which are active. If the channel is unknown, inactive, or the server or relay does not support channels, the command fails and says why: don't guess other names; send the note without `--channel` or tell the user.

@@ -102,11 +102,112 @@ describe('peerband notify', () => {
   });
 
   it('is listed in help', async () => {
+    expect((await runCli(['notify', '--help'])).stdout).toContain('--channel NAME');
     const root = await runCli(['--help']);
     expect(root.stdout).toContain('notify');
     const help = await runCli(['notify', '--help']);
     expect(help.stdout).toContain('peerband notify "<text>"');
     expect(help.stdout).toContain('owner');
+  });
+});
+
+const CHANNELS = [
+  { name: 'deploys', format: 'slack', state: 'active', events: ['agent.notified'] },
+  { name: 'ci', format: 'standard', state: 'paused', events: [] },
+];
+
+/** A fake PeerBand server for GET /api/installation/channels; records the URLs it was asked for. */
+function channelServer(reply: { status?: number; body?: unknown } = { body: { channels: CHANNELS } }) {
+  const urls: string[] = [];
+  const fake = (async (input: string | URL | Request) => {
+    urls.push(String(input));
+    return new Response(JSON.stringify(reply.body ?? {}), { status: reply.status ?? 200 });
+  }) as typeof fetch;
+  return { fetch: fake, urls };
+}
+
+async function login(home: string, serverUrl = 'https://peerband.com'): Promise<void> {
+  await saveCredentials({ serverUrl, installationId: 'inst-1', credential: 'machine-secret', machineName: 'work-box' }, join(home, 'credentials.json'));
+}
+
+describe('peerband notify --channel', () => {
+  it('checks the channel, sends it with the note, and needs the relay to echo it', async () => {
+    const helper = await fakeHelper((request, socket) => socket.end(`${JSON.stringify({ ok: true, sent: true, agentId: null, eventId: 'e-1', channel: request.channel })}\n`));
+    try {
+      await login(helper.home);
+      const server = channelServer();
+      const result = await runCli(['notify', '--channel', 'deploys', 'Release is live'], { env: { PEERBAND_CONFIG_HOME: helper.home }, overrides: { fetch: server.fetch } });
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stdout).toContain('Note sent to channel deploys');
+      expect(server.urls).toEqual(['https://peerband.com/api/installation/channels']);
+      expect(helper.received).toEqual([{ token: 'secret-token', command: 'notify', text: 'Release is live', channel: 'deploys' }]);
+      const json = await runCli(['notify', '--json', '--channel', 'deploys', 'Build green'], { env: { PEERBAND_CONFIG_HOME: helper.home }, overrides: { fetch: server.fetch } });
+      expect(JSON.parse(json.stdout)).toEqual({ sent: true, agentId: null, eventId: 'e-1', channel: 'deploys' });
+    } finally {
+      await helper.close();
+    }
+  });
+
+  it('says the relay is too old when it does not echo the channel', async () => {
+    // A relay from before channels drops the field and answers as usual.
+    const sent = await fakeHelper({ ok: true, sent: true, agentId: null, eventId: 'e-1' });
+    try {
+      await login(sent.home);
+      const result = await runCli(['notify', '--channel', 'deploys', 'hello'], { env: { PEERBAND_CONFIG_HOME: sent.home }, overrides: { fetch: channelServer().fetch } });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain('too old for channels');
+      expect(result.stderr).toContain('sent without one');
+      expect(result.stderr).toContain('peerband update');
+    } finally { await sent.close(); }
+    const offline = await fakeHelper({ ok: true, sent: false, agentId: null });
+    try {
+      await login(offline.home);
+      const result = await runCli(['notify', '--channel', 'deploys', 'hello'], { env: { PEERBAND_CONFIG_HOME: offline.home }, overrides: { fetch: channelServer().fetch } });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain('too old for channels. The note was not sent.');
+    } finally { await offline.close(); }
+  });
+
+  it('fails before contacting the relay on an old server, an unknown or inactive channel, or a bad name', async () => {
+    const helper = await fakeHelper({ ok: true, sent: true, agentId: null, eventId: 'e-1', channel: 'deploys' });
+    try {
+      await login(helper.home);
+      const env = { PEERBAND_CONFIG_HOME: helper.home };
+      const oldServer = await runCli(['notify', '--channel', 'deploys', 'hello'], { env, overrides: { fetch: channelServer({ status: 404, body: { detail: 'Not Found' } }).fetch } });
+      expect(oldServer.code).toBe(1);
+      expect(oldServer.stderr).toContain("This PeerBand server doesn't support channels yet.");
+      const unknown = await runCli(['notify', '--channel', 'deploy', 'hello'], { env, overrides: { fetch: channelServer().fetch } });
+      expect(unknown.code).toBe(1);
+      expect(unknown.stderr).toContain('no channel named "deploy"');
+      expect(unknown.stderr).toContain('Available channels: deploys, ci');
+      const none = await runCli(['notify', '--channel', 'deploys', 'hello'], { env, overrides: { fetch: channelServer({ body: { channels: [] } }).fetch } });
+      expect(none.code).toBe(1);
+      expect(none.stderr).toContain('https://peerband.com/dashboard');
+      const paused = await runCli(['notify', '--channel', 'ci', 'hello'], { env, overrides: { fetch: channelServer().fetch } });
+      expect(paused.code).toBe(1);
+      expect(paused.stderr).toContain('"ci" is paused');
+      const server = channelServer();
+      for (const name of ['Deploys', 'x_y', '-x', 'a'.repeat(33), 'with space']) {
+        const bad = await runCli(['notify', '--channel', name, 'hello'], { env, overrides: { fetch: server.fetch } });
+        expect(bad.code, name).toBe(2);
+        if (name !== '-x') expect(bad.stderr).toContain('not a channel name');
+      }
+      expect(server.urls).toEqual([]);
+      expect(helper.received).toEqual([]);
+    } finally {
+      await helper.close();
+    }
+  });
+
+  it('needs a login', async () => {
+    const helper = await fakeHelper({ ok: true, sent: true, agentId: null, channel: 'deploys' });
+    try {
+      const result = await runCli(['notify', '--channel', 'deploys', 'hello'], { env: { PEERBAND_CONFIG_HOME: helper.home }, overrides: { fetch: channelServer().fetch } });
+      expect(result.code).toBe(3);
+      expect(helper.received).toEqual([]);
+    } finally {
+      await helper.close();
+    }
   });
 });
 
@@ -143,6 +244,15 @@ describe('peerband notify through the real relay helper', () => {
       const note = frames.find((frame) => frame.name === 'agent.notified')!;
       expect(note).toMatchObject({ eventId: reply.eventId, data: { agentId: reply.agentId, text: 'Build green, token=[REDACTED]', audience: 'owner' } });
       expect(headers[0]).toBe('events');
+      // --channel goes through the supervisor and the connector, which echo it back.
+      const channels = channelServer();
+      const addressed = await runCli(['notify', '--json', '--channel', 'deploys', 'Release is live'], { env: { PEERBAND_CONFIG_HOME: home }, overrides: { fetch: channels.fetch } });
+      expect(addressed.code, addressed.stderr).toBe(0);
+      expect(channels.urls).toEqual([new URL('/api/installation/channels', relay.url).href]);
+      const addressedReply = JSON.parse(addressed.stdout) as { eventId: string; channel: string };
+      expect(addressedReply.channel).toBe('deploys');
+      for (let attempt = 0; attempt < 50 && !frames.some((frame) => frame.eventId === addressedReply.eventId); attempt++) await pause(50);
+      expect(frames.find((frame) => frame.eventId === addressedReply.eventId)).toMatchObject({ name: 'agent.notified', data: { text: 'Release is live', audience: 'owner', channel: 'deploys' } });
       expect(JSON.stringify(frames)).not.toContain('Recent activity is demo data');
     } finally {
       await command('stop').catch(() => undefined);

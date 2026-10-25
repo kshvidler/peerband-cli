@@ -29,7 +29,7 @@ The grant flow (`enrollment-redeem.schema.json`) remains available for headless 
 6. Agent events: the client sends `x-peerband-features: events` on the upgrade and then pushes `event` frames (`eventId`, `name`, `timestamp`, `data`) without being asked:
    - `agent.status_changed` `{agentId, status, previousStatus, label, workspace, revision}` when an agent's status changes (at most one per agent per 250 ms, latest wins, with an overall rate cap);
    - `agents.changed` `{}` when agents appear, exit or change occupant, and once after every (re)connect, so consumers re-list;
-   - `agent.notified` `{agentId, text, audience: "owner"}` for a note sent with `peerband notify` (1 to 1024 characters, sanitized and redacted like agent output).
+   - `agent.notified` `{agentId, text, audience: "owner", channel?}` for a note sent with `peerband notify` (1 to 1024 characters, sanitized and redacted like agent output). `channel` is set by `peerband notify --channel NAME`: the name (`^[a-z0-9][a-z0-9-]{0,31}$`) of one of the owner's webhook endpoints. The note is still published on the machine's event stream (so it shows in the dashboard); only webhook delivery changes: that one endpoint receives it instead of every endpoint that takes notes. The CLI checks the channel with `GET /api/installation/channels` (installation credential; returns `{channels: [{name, format, state, events}]}`, never URLs or secrets) before sending.
    Events are metadata only and never carry terminal output. They are sent only while the socket is open; nothing is queued while disconnected.
 
 The client only reports metadata (tool, target id, outcome, latency) to its local activity log; message bodies and agent output are never logged.

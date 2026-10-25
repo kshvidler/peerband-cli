@@ -1,3 +1,4 @@
+import { spec as channels } from './commands/channels.js';
 import { spec as connect } from './commands/connect.js';
 import { groupSpec, installSpec, uninstallSpec } from './commands/herdr.js';
 import { spec as login } from './commands/login.js';
@@ -12,7 +13,7 @@ import { spec as update } from './commands/update.js';
 import type { CommandSpec } from './types.js';
 
 /** Top-level commands in help order. `herdr` is a group handled separately. */
-export const commands: CommandSpec[] = [setup, login, logout, status, update, relay, skill, share, notify, connect];
+export const commands: CommandSpec[] = [setup, login, logout, status, update, relay, skill, share, notify, channels, connect];
 export const herdrCommands: CommandSpec[] = [installSpec, uninstallSpec];
 export { groupSpec as herdrGroup };
 
