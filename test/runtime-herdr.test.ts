@@ -120,6 +120,30 @@ describe('Herdr adapter identity and write policy', () => {
     } finally { await adapter.close(); }
   });
 
+  it('reports each Herdr agent space and tab with sanitized labels and positions', async () => {
+    const { socketPath } = await fakeSocket((socket) => respond(socket, (request) => {
+      if (request.method === 'ping') return { type: 'pong', version: '0.9.3', protocol: 22 };
+      return { type: 'agent_list', agents: [agentInfo('terminal-one')] };
+    }));
+    const adapter = new HerdrAdapter({ schemaPath: fixture, socketPath });
+    try {
+      const [agent] = await adapter.listAgents();
+      expect(agent!.location).toEqual({ space: { id: 'workspace-1', label: 'api', number: 2 }, tab: { id: 'workspace-1:1', label: 'review', number: 1 } });
+    } finally { await adapter.close(); }
+  });
+
+  it('keeps space and tab ids when Herdr cannot list spaces or tabs', async () => {
+    const { socketPath } = await fakeSocket((socket) => respond(socket, (request) => {
+      if (request.method === 'ping') return { type: 'pong', version: '0.9.3', protocol: 22 };
+      return { type: 'agent_list', agents: [agentInfo('terminal-one')] };
+    }, { 'workspace.list': { error: { code: 'unknown_method', message: 'no' } }, 'tab.list': { error: { code: 'unknown_method', message: 'no' } } }));
+    const adapter = new HerdrAdapter({ schemaPath: fixture, socketPath });
+    try {
+      const [agent] = await adapter.listAgents();
+      expect(agent!.location).toEqual({ space: { id: 'workspace-1', label: null, number: null }, tab: { id: 'workspace-1:1', label: null, number: null } });
+    } finally { await adapter.close(); }
+  });
+
   it('sends only to a unique live named agent', async () => {
     let prompt: unknown;
     const { socketPath } = await fakeSocket((socket) => respond(socket, (request) => {
@@ -219,7 +243,12 @@ async function fakeSocket(onConnection: (socket: import('node:net').Socket) => v
   return { socketPath };
 }
 
-function respond(socket: import('node:net').Socket, result: (request: { id: string; method: string; params?: Record<string, unknown> }) => unknown): void {
+const defaultLayout: Record<string, unknown> = {
+  'workspace.list': { type: 'workspace_list', workspaces: [{ workspace_id: 'workspace-1', number: 2, label: 'api', focused: true, pane_count: 1, tab_count: 1, active_tab_id: 'workspace-1:1', agent_status: 'working' }] },
+  'tab.list': { type: 'tab_list', tabs: [{ tab_id: 'workspace-1:1', workspace_id: 'workspace-1', number: 1, label: 'review ', focused: true, pane_count: 1, agent_status: 'working' }] },
+};
+
+function respond(socket: import('node:net').Socket, result: (request: { id: string; method: string; params?: Record<string, unknown> }) => unknown, layout: Record<string, unknown> = defaultLayout): void {
   let data = '';
   socket.on('data', (chunk) => {
     data += chunk.toString();
@@ -227,7 +256,8 @@ function respond(socket: import('node:net').Socket, result: (request: { id: stri
     data = lines.pop() ?? '';
     for (const line of lines) {
       const request = JSON.parse(line) as { id: string; method: string };
-      const response = result(request);
+      // Space and tab listings are layout metadata; tests that care pass `layout`.
+      const response = request.method in layout ? layout[request.method] : result(request);
       socket.write(`${JSON.stringify(response && typeof response === 'object' && 'error' in response ? { id: request.id, error: response.error } : { id: request.id, result: response })}\n`);
     }
   });

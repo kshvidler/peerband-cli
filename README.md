@@ -98,7 +98,7 @@ No browser available? Pass a one-time grant from the PeerBand dashboard instead:
 | Tool | Scope | What it does |
 | --- | --- | --- |
 | `list_machines` | `agents:read` | Your machines (and machines shared with you), their installation IDs and whether each is online. Call it first |
-| `list_agents` | `agents:read` | The agents on a machine, with status, label and workspace |
+| `list_agents` | `agents:read` | The agents on a machine, with status, label, workspace and Herdr location (space and tab) |
 | `get_agent_status` | `agents:read` | The status of one agent: `idle`, `working`, `blocked`, `done` or `unknown` |
 | `get_agent_output` | `agents:read` | A bounded excerpt of an agent's recent output |
 | `wait_for_agent` | `agents:read` | Wait up to 50 seconds for an agent to reach a status (default: idle, blocked or done), without polling or reading output |

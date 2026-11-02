@@ -32,7 +32,10 @@ interface Subscriber { socket: Socket; subscriptions: Array<{ type: string; pane
 
 /** A fake Herdr server: request/response methods plus a long-lived events.subscribe socket. */
 async function fakeHerdr(options: { rejectSubscribe?: string } = {}) {
-  const state = { agents: [agent('w1:p1', 'term-1'), agent('w1:p2', 'term-2', 'idle')] as Array<Record<string, unknown>> };
+  const state = {
+    agents: [agent('w1:p1', 'term-1'), agent('w1:p2', 'term-2', 'idle')] as Array<Record<string, unknown>>,
+    tabs: [{ tab_id: 'w1:t1', workspace_id: 'w1', number: 1, label: 'main', focused: true, pane_count: 2, agent_status: 'working' }] as Array<Record<string, unknown>>,
+  };
   const methods: string[] = [];
   const subscribers: Subscriber[] = [];
   const server: Server = createServer((socket) => {
@@ -48,6 +51,8 @@ async function fakeHerdr(options: { rejectSubscribe?: string } = {}) {
         const reply = (body: Record<string, unknown>) => socket.write(`${JSON.stringify({ id: request.id, ...body })}\n`);
         if (request.method === 'ping') reply({ result: { type: 'pong', version: '0.9.3', protocol: 22 } });
         else if (request.method === 'agent.list') reply({ result: { type: 'agent_list', agents: state.agents } });
+        else if (request.method === 'workspace.list') reply({ result: { type: 'workspace_list', workspaces: [{ workspace_id: 'w1', number: 1, label: 'repo', focused: true, pane_count: 2, tab_count: 1, active_tab_id: 'w1:t1', agent_status: 'working' }] } });
+        else if (request.method === 'tab.list') reply({ result: { type: 'tab_list', tabs: state.tabs } });
         else if (request.method === 'events.subscribe') {
           if (options.rejectSubscribe) { reply({ error: { code: options.rejectSubscribe, message: 'no' } }); continue; }
           const subscriber = { socket, subscriptions: request.params.subscriptions ?? [] };
@@ -93,7 +98,20 @@ describe('Herdr agent events', () => {
       { type: 'pane.agent_status_changed', pane_id: 'w1:p1' },
       { type: 'pane.agent_status_changed', pane_id: 'w1:p2' },
       { type: 'pane.created' }, { type: 'pane.closed' }, { type: 'pane.exited' }, { type: 'pane.agent_detected' },
+      { type: 'pane.moved' }, { type: 'tab.renamed' }, { type: 'tab.moved' }, { type: 'workspace.renamed' }, { type: 'workspace.reordered' },
     ]);
+  });
+
+  it('reports a tab rename as agents.changed so clients regroup the list', async () => {
+    const herdr = await fakeHerdr();
+    const { adapter, events } = await startAdapter(herdr);
+    const [first] = await adapter.listAgents();
+    expect(first!.location).toEqual({ space: { id: 'w1', label: 'repo', number: 1 }, tab: { id: 'w1:t1', label: 'main', number: 1 } });
+    events.length = 0;
+    herdr.state.tabs[0] = { ...herdr.state.tabs[0], label: 'review' };
+    herdr.push('tab.renamed', { tab_id: 'w1:t1', label: 'review' });
+    await eventually(() => events.some((event) => event.kind === 'agents_changed'), 'agents_changed after a tab rename');
+    expect((await adapter.listAgents())[0]!.location?.tab.label).toBe('review');
   });
 
   it('maps panes to agent ids and reports transitions with previousStatus and the fresh revision', async () => {

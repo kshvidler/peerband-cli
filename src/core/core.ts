@@ -24,6 +24,20 @@ export interface AgentRecord {
   observedAt: string;
   stale: boolean;
   capabilities: Capabilities;
+  /** Where the agent sits in its runtime's layout, when the runtime has one (Herdr: space, then tab). */
+  location?: AgentLocation;
+}
+
+/** A space or tab: its runtime id, its user-visible label and its 1-based position, when known. */
+export interface LayoutNode {
+  id: string;
+  label: string | null;
+  number: number | null;
+}
+
+export interface AgentLocation {
+  space: LayoutNode;
+  tab: LayoutNode;
 }
 
 export interface OutputOptions {

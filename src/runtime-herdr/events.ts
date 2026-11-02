@@ -30,8 +30,14 @@ export interface HerdrEventBridgeOptions {
   openSubscription?: typeof openSubscription;
 }
 
-/** Herdr list events: anything that can add, remove or replace an agent. */
-const LIST_SUBSCRIPTIONS = ['pane.created', 'pane.closed', 'pane.exited', 'pane.agent_detected'];
+/**
+ * Herdr list events: anything that can add, remove or replace an agent, or move it to another
+ * space or tab, or rename or reorder the space or tab it is in (list_agents reports its location).
+ */
+const LIST_SUBSCRIPTIONS = [
+  'pane.created', 'pane.closed', 'pane.exited', 'pane.agent_detected',
+  'pane.moved', 'tab.renamed', 'tab.moved', 'workspace.renamed', 'workspace.reordered',
+];
 const UNSUPPORTED = new Set(['invalid_request', 'unknown_method', 'method_not_found', 'unsupported_capability', 'schema_mismatch']);
 
 const normalizeName = (name: string): string => name.replaceAll('.', '_');

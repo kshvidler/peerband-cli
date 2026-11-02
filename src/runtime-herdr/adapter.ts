@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { ConnectError, sanitizeOutput, type AgentRecord, type Capabilities, type OutputOptions, type OutputResult, type RuntimeAdapter, type RuntimeEventListener } from '../core/index.js';
+import { ConnectError, sanitizeOutput, type AgentLocation, type AgentRecord, type Capabilities, type OutputOptions, type OutputResult, type RuntimeAdapter, type RuntimeEventListener } from '../core/index.js';
 import { HerdrEventBridge, type BridgeAgent, type HerdrEventBridgeOptions } from './events.js';
 import { HerdrSocketClient } from './socket-client.js';
 import { loadHerdrSchema, type ValidatedHerdrSchema } from './schema.js';
@@ -65,7 +65,8 @@ export class HerdrAdapter implements RuntimeAdapter {
 
   private async refreshAgents(): Promise<AgentRecord[]> {
     const { client } = await this.initialize();
-    const result = asObject(await client.request('agent.list', {}));
+    const [listed, layout] = await Promise.all([client.request('agent.list', {}), readLayout(client)]);
+    const result = asObject(listed);
     if (result.type !== 'agent_list' || !Array.isArray(result.agents)) throw this.schemaMismatch('agent.list returned an unexpected result type');
     const marker = this.socketPath ? await readEndpointMarker(this.socketPath) : undefined;
     const reconnected = marker !== undefined && this.endpointMarker !== undefined && marker !== this.endpointMarker;
@@ -84,14 +85,19 @@ export class HerdrAdapter implements RuntimeAdapter {
       const live = { id, fingerprint, agent: raw };
       next.set(raw.pane_id, live);
       nextIds.add(id);
-      records.push(toRecord(live, this.machineId, promptTarget(raw, rawAgents) !== undefined));
+      records.push(toRecord(live, this.machineId, promptTarget(raw, rawAgents) !== undefined, layout));
     }
     for (const previous of previousTargets) if (!nextIds.has(previous.id)) this.retired.add(previous.id);
     const idsChanged = this.listed && (nextIds.size !== previousTargets.length || previousTargets.some((item) => !nextIds.has(item.id)));
+    // A moved pane or a renamed/reordered space or tab changes how clients group the list.
+    const layoutChanged = this.listed && records.some((record) => {
+      const before = this.records.get(record.id);
+      return before !== undefined && JSON.stringify(before.location) !== JSON.stringify(record.location);
+    });
     this.current = next;
     this.records = new Map(records.map((record) => [record.id, record]));
     this.listed = true;
-    this.bridge?.agentsRefreshed(idsChanged);
+    this.bridge?.agentsRefreshed(idsChanged || layoutChanged);
     return records;
   }
 
@@ -221,7 +227,52 @@ export class HerdrAdapter implements RuntimeAdapter {
   }
 }
 
-function toRecord(live: LiveTarget, machineId: string, canSend: boolean): AgentRecord {
+type Layout = { spaces: Map<string, LayoutEntry>; tabs: Map<string, LayoutEntry> };
+type LayoutEntry = { label: string | null; number: number | null };
+
+/** Space and tab labels and positions. Best effort: an older or unexpected Herdr leaves them out. */
+async function readLayout(client: HerdrSocketClient): Promise<Layout> {
+  const [spaces, tabs] = await Promise.all([
+    client.request('workspace.list', {}).then((result) => layoutEntries(result, 'workspace_list', 'workspaces', 'workspace_id'), () => new Map<string, LayoutEntry>()),
+    client.request('tab.list', {}).then((result) => layoutEntries(result, 'tab_list', 'tabs', 'tab_id'), () => new Map<string, LayoutEntry>()),
+  ]);
+  return { spaces, tabs };
+}
+
+function layoutEntries(result: unknown, type: string, key: string, idKey: string): Map<string, LayoutEntry> {
+  const entries = new Map<string, LayoutEntry>();
+  if (!result || typeof result !== 'object') return entries;
+  const value = result as Record<string, unknown>;
+  if (value.type !== type || !Array.isArray(value[key])) return entries;
+  for (const item of value[key] as unknown[]) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as Record<string, unknown>;
+    if (typeof row[idKey] !== 'string') continue;
+    entries.set(row[idKey] as string, {
+      label: layoutLabel(row.label),
+      number: Number.isSafeInteger(row.number) && (row.number as number) >= 0 ? row.number as number : null,
+    });
+  }
+  return entries;
+}
+
+/** Labels are user text from the machine: strip control characters and bound the length. */
+function layoutLabel(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const label = value.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').trim().slice(0, 128);
+  return label || null;
+}
+
+function toLocation(agent: HerdrAgent, layout: Layout): AgentLocation {
+  const space = layout.spaces.get(agent.workspace_id);
+  const tab = layout.tabs.get(agent.tab_id);
+  return {
+    space: { id: agent.workspace_id, label: space?.label ?? null, number: space?.number ?? null },
+    tab: { id: agent.tab_id, label: tab?.label ?? null, number: tab?.number ?? null },
+  };
+}
+
+function toRecord(live: LiveTarget, machineId: string, canSend: boolean, layout: Layout): AgentRecord {
   const agent = live.agent;
   const label = agent.display_agent ?? agent.name ?? agent.agent ?? agent.terminal_title_stripped ?? agent.title ?? 'Herdr agent';
   const status = ['idle', 'working', 'blocked', 'done', 'unknown'].includes(agent.agent_status) ? agent.agent_status as AgentRecord['status'] : 'unknown';
@@ -237,6 +288,7 @@ function toRecord(live: LiveTarget, machineId: string, canSend: boolean): AgentR
     observedAt: new Date().toISOString(),
     stale: false,
     capabilities: { readOutput: true, sendMessage: canSend, ...(canSend ? {} : { reason: 'A unique valid live name or pane target is required for prompt targeting.' }) },
+    location: toLocation(agent, layout),
   };
 }
 
