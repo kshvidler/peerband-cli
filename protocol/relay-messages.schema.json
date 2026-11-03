@@ -11,6 +11,21 @@
     { "$ref": "#/$defs/event" }
   ],
   "$defs": {
+    "environmentControlArgs": {
+      "description": "Owner-only, opt-in actions; no native args, shell, implicit targets, close/stop or env overrides. cwd must be an absolute path on the remote machine. See README for supported agent kinds.",
+      "oneOf": [
+        {"type": "object", "required": ["action", "idempotencyKey", "cwd"], "additionalProperties": false, "properties": {"action": {"const": "workspace.create"}, "idempotencyKey": {"type": "string", "minLength": 16, "maxLength": 256}, "cwd": {"type": "string", "minLength": 1, "maxLength": 2048}, "label": {"type": "string", "minLength": 1, "maxLength": 128}}},
+        {"type": "object", "required": ["action", "idempotencyKey", "workspaceId", "cwd"], "additionalProperties": false, "properties": {"action": {"const": "tab.create"}, "idempotencyKey": {"type": "string", "minLength": 16, "maxLength": 256}, "workspaceId": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9][A-Za-z0-9:_-]{0,255}$"}, "cwd": {"type": "string", "minLength": 1, "maxLength": 2048}, "label": {"type": "string", "minLength": 1, "maxLength": 128}}},
+        {"type": "object", "required": ["action", "idempotencyKey", "paneId", "cwd", "direction"], "additionalProperties": false, "properties": {"action": {"const": "pane.split"}, "idempotencyKey": {"type": "string", "minLength": 16, "maxLength": 256}, "paneId": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9][A-Za-z0-9:_-]{0,255}$"}, "cwd": {"type": "string", "minLength": 1, "maxLength": 2048}, "direction": {"enum": ["right", "down", "left", "up"]}}},
+        {"type": "object", "required": ["action", "idempotencyKey", "paneId", "name", "kind"], "additionalProperties": false, "properties": {"action": {"const": "agent.start"}, "idempotencyKey": {"type": "string", "minLength": 16, "maxLength": 256}, "paneId": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9][A-Za-z0-9:_-]{0,255}$"}, "name": {"type": "string", "minLength": 1, "maxLength": 32, "pattern": "^[a-z][a-z0-9_-]{0,31}$"}, "kind": {"type": "string", "minLength": 1, "maxLength": 32}}},
+        {"type": "object", "required": ["action", "idempotencyKey", "workspaceId"], "additionalProperties": false, "properties": {"action": {"const": "workspace.focus"}, "idempotencyKey": {"type": "string", "minLength": 16, "maxLength": 256}, "workspaceId": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9][A-Za-z0-9:_-]{0,255}$"}}},
+        {"type": "object", "required": ["action", "idempotencyKey", "workspaceId", "label"], "additionalProperties": false, "properties": {"action": {"const": "workspace.rename"}, "idempotencyKey": {"type": "string", "minLength": 16, "maxLength": 256}, "workspaceId": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9][A-Za-z0-9:_-]{0,255}$"}, "label": {"type": "string", "minLength": 1, "maxLength": 128}}},
+        {"type": "object", "required": ["action", "idempotencyKey", "tabId"], "additionalProperties": false, "properties": {"action": {"const": "tab.focus"}, "idempotencyKey": {"type": "string", "minLength": 16, "maxLength": 256}, "tabId": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9][A-Za-z0-9:_-]{0,255}$"}}},
+        {"type": "object", "required": ["action", "idempotencyKey", "tabId", "label"], "additionalProperties": false, "properties": {"action": {"const": "tab.rename"}, "idempotencyKey": {"type": "string", "minLength": 16, "maxLength": 256}, "tabId": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9][A-Za-z0-9:_-]{0,255}$"}, "label": {"type": "string", "minLength": 1, "maxLength": 128}}},
+        {"type": "object", "required": ["action", "idempotencyKey", "paneId"], "additionalProperties": false, "properties": {"action": {"const": "pane.focus"}, "idempotencyKey": {"type": "string", "minLength": 16, "maxLength": 256}, "paneId": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9][A-Za-z0-9:_-]{0,255}$"}}},
+        {"type": "object", "required": ["action", "idempotencyKey", "paneId", "label"], "additionalProperties": false, "properties": {"action": {"const": "pane.rename"}, "idempotencyKey": {"type": "string", "minLength": 16, "maxLength": 256}, "paneId": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9][A-Za-z0-9:_-]{0,255}$"}, "label": {"type": "string", "minLength": 1, "maxLength": 128}}}
+      ]
+    },
     "agentStatus": { "enum": ["idle", "working", "blocked", "done", "unknown"] },
     "event": {
       "title": "client -> server: agent event",
@@ -77,16 +92,17 @@
     },
     "request": {
       "title": "server -> client: tool request",
+      "allOf": [{"if": {"properties": {"tool": {"const": "control_environment"}}}, "then": {"properties": {"args": {"$ref": "#/$defs/environmentControlArgs"}}}}, {"if": {"properties": {"tool": {"const": "list_environment"}}}, "then": {"properties": {"args": {"type": "object", "maxProperties": 0}}}}],
       "description": "At most 32 outstanding per connection; the client answers within 15 seconds. Requests are never replayed.",
       "type": "object",
       "required": ["type", "id", "tool", "args", "principal"],
       "properties": {
         "type": { "const": "request" },
         "id": { "type": "string", "minLength": 1, "maxLength": 256 },
-        "tool": { "enum": ["list_agents", "get_agent_status", "get_agent_output", "get_request_status", "send_agent_message"] },
+        "tool": { "enum": ["list_agents", "get_agent_status", "get_agent_output", "get_request_status", "send_agent_message", "list_environment", "control_environment"] },
         "args": {
           "type": "object",
-          "description": "camelCase arguments: list_agents {machine, workspace, status, cursor, limit}; get_agent_status {agentId}; get_agent_output {agentId, lines, bytes, cursor}; send_agent_message {agentId, message, idempotencyKey}; get_request_status {requestId}."
+          "description": "camelCase arguments: list_agents {machine, workspace, status, cursor, limit}; get_agent_status {agentId}; get_agent_output {agentId, lines, bytes, cursor}; send_agent_message {agentId, message, idempotencyKey}; get_request_status {requestId}; list_environment {}; control_environment {action, idempotencyKey, workspaceId?, tabId?, paneId?, cwd?, label?, direction?, name?, kind?}. Environment tools require the environment-control upgrade feature, owner role and environment:control scope."
         },
         "principal": {
           "type": "object",

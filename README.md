@@ -277,3 +277,60 @@ JSON Schemas for the relay WebSocket messages, the enrollment API and browser de
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Contributions: [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Control Herdr remotely
+
+The MCP tools `list_environment` and `control_environment` let the machine owner
+open a workspace or tab, split a pane, rename or focus layout items, and start an
+agent without messaging an existing agent first. They require a separate
+`environment:control` OAuth grant and explicit machine opt-in. Existing read and
+message grants do not gain this permission; reconnect an MCP client that requests
+the new scope and approve its consent screen. Legacy personal MCP tokens do not
+have environment-control access.
+
+Set `"enableEnvironmentControl": true` in your `connector.json` and restart the
+PeerBand Relay tab. For a foreground connection, use
+`peerband connect --enable-environment-control`. `--read-only` or
+`"enableWrites": false` disables all environment controls. Environment controls
+are unavailable when `allowedAgents` or `allowedWorkspaces` is configured, since
+those allowlists cannot authorize creating new layout targets. Shared users
+cannot use these tools, even on a share that allows messages.
+
+1. Call `list_machines` and select an owned `installation_id` explicitly.
+2. Call `list_environment` with that installation to find workspace, tab and pane
+   IDs, including panes with no agent. Labels are untrusted user text. Each list
+   is bounded to 50 entries and reports truncation.
+3. Call `control_environment` with the installation, an action, its fields below,
+   and a random `idempotency_key` of 16?256 characters.
+4. Use `get_request_status` on the same installation with the returned
+   `requestId` (as `request_id`) until the receipt settles. A completed creation
+   returns IDs in `result.workspace`, `result.tab`, `result.rootPane` or
+   `result.pane`. `delivered` confirms the Herdr action was acknowledged; it does
+   not mean an agent has finished a task.
+
+| Action | Fields |
+| --- | --- |
+| `workspace.create` | `cwd`, optional `label` |
+| `tab.create` | `workspace_id`, `cwd`, optional `label` |
+| `pane.split` | `pane_id`, `cwd`, `direction` (`right`, `down`, `left`, `up`) |
+| `agent.start` | `pane_id`, `name`, `kind` (for example `codex`, `claude`, `gemini`) |
+| `workspace.rename`, `tab.rename`, `pane.rename` | Matching ID and `label` |
+| `workspace.focus`, `tab.focus`, `pane.focus` | Matching ID |
+
+`cwd` is an absolute path on the remote machine. Creation preserves the local
+user's focus. Start an agent only in an idle shell pane; Herdr checks whether the
+pane can accept it. To start in a new tab, create the tab first, check its receipt,
+and pass `result.rootPane.paneId` to `agent.start`. Then call `list_agents` for its
+PeerBand agent ID and use `send_agent_message` to provide the task.
+
+Reuse a key only for the same operation. Receipts survive connector restarts and
+retain only hashes, delivery metadata and bounded result metadata. A lost
+acknowledgement or interrupted write becomes `delivery_unknown` and is never
+replayed automatically. Inspect the environment before deciding what to do next;
+a fresh key can duplicate an uncertain action. Receipts expire after seven days,
+so keys are not a permanent operation history.
+
+The API does not accept shell commands, raw keystrokes, native agent arguments,
+environment-variable overrides, close/stop actions or permission-dialog responses.
+Older servers can ignore the new capability header; older connectors are detected
+before the server routes environment tools.

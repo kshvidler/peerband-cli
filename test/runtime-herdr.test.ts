@@ -232,6 +232,34 @@ describe('Herdr adapter identity and write policy', () => {
   });
 });
 
+describe('Herdr environment control', () => {
+  it('lists empty panes, creates a tab without focus, and starts an agent using schema-validated socket requests', async () => {
+    const requests: Array<{ method: string; params?: Record<string, unknown> }> = [];
+    const pane = { ...agentInfo('terminal-new', 'idle'), agent: null };
+    const tab = (defaultLayout['tab.list'] as { tabs: unknown[] }).tabs[0];
+    const { socketPath } = await fakeSocket((socket) => respond(socket, (request) => {
+      requests.push(request);
+      if (request.method === 'ping') return { type: 'pong', version: '0.9.3', protocol: 22 };
+      if (request.method === 'pane.list') return { type: 'pane_list', panes: [pane] };
+      if (request.method === 'tab.create') return { type: 'tab_created', tab, root_pane: pane };
+      if (request.method === 'agent.start') return { type: 'agent_started', agent: agentInfo('terminal-new'), argv: ['private-native-launch-details'] };
+      return { type: 'ok' };
+    }));
+    const adapter = new HerdrAdapter({ schemaPath: fixture, socketPath });
+    try {
+      const layout = await adapter.listEnvironment();
+      expect(layout.panes).toMatchObject([{ paneId: 'workspace-1-1' }]);
+      const created = await adapter.controlEnvironment({ action: 'tab.create', workspaceId: 'workspace-1', cwd: '/project', label: 'New' });
+      expect(created.rootPane).toMatchObject({ paneId: 'workspace-1-1' });
+      expect(requests.find((r) => r.method === 'tab.create')?.params).toEqual({ workspace_id: 'workspace-1', cwd: '/project', label: 'New', focus: false });
+      const started = await adapter.controlEnvironment({ action: 'agent.start', paneId: 'workspace-1-1', name: 'worker', kind: 'codex' });
+      expect(started.agent).toMatchObject({ paneId: 'workspace-1-1' });
+      expect(JSON.stringify(started)).not.toContain('private-native-launch-details');
+      expect(requests.find((r) => r.method === 'agent.start')?.params).toEqual({ pane_id: 'workspace-1-1', name: 'worker', kind: 'codex', timeout_ms: 8000 });
+    } finally { await adapter.close(); }
+  });
+});
+
 async function fakeSocket(onConnection: (socket: import('node:net').Socket) => void): Promise<{ socketPath: string }> {
   const server = createServer(onConnection);
   servers.push(server);

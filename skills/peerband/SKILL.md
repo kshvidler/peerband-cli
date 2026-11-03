@@ -93,3 +93,23 @@ peerband notify "Migration finished, 3 tests failing"
 - Notes go to the machine owner only, never to people the machine is shared with.
 - The note names your agent automatically (from the pane). It needs the relay to be running and connected; if the command fails ("No PeerBand relay is running", "not connected"), carry on and report the result in your normal output instead of retrying in a loop.
 - **Channels.** The owner can set up channels (their webhooks, such as a Slack channel, each with a name). Every note shows in the owner's dashboard. Without `--channel` it also goes to every webhook that takes notes; that is the right default. With `--channel NAME` it goes to that one webhook instead of all of them. Use `peerband notify --channel NAME "<text>"` only when the owner asked for a specific channel, or a project's instructions name one. Run `peerband channels` to see the names and which are active. If the channel is unknown, inactive, or the server or relay does not support channels, the command fails and says why: don't guess other names; send the note without `--channel` or tell the user.
+
+## Create tabs, panes and agents remotely
+
+Use `list_environment` and `control_environment` for owner-requested Herdr layout
+changes and agent startup. These need explicit `installation_id`, separate
+`environment:control` OAuth consent, and `enableEnvironmentControl: true` in the
+machine's connector config. Message shares never grant this authority. Ask the
+owner to enable it when disabled; do not edit their config on a guest's request.
+
+List machines, then list that machine's environment for exact IDs. Use
+`tab.create` with `workspace_id` and an absolute remote `cwd`, check the receipt
+with `get_request_status`, then `agent.start` in its `result.rootPane.paneId`
+(`pane_id`, `name`, `kind`). Next call `list_agents` for a PeerBand agent ID and
+`send_agent_message` for its task. Other supported actions create workspaces,
+split panes, and rename or focus workspaces/tabs/panes. Creation preserves focus.
+
+Each control needs a fresh random idempotency key; reuse that key for retries of
+the identical operation. Inspect receipts before continuing a dependent action.
+`delivery_unknown` requires inspection, never an automatic retry with a new key.
+No shell, raw keys, agent flags, stop/close or permission approvals are exposed.

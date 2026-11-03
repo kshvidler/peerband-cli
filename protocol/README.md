@@ -41,3 +41,32 @@ The client only reports metadata (tool, target id, outcome, latency) to its loca
 The protocol has no explicit version field today. Changes are additive: new optional fields, new `tool` values and new frame types may appear, so implementations must ignore unknown fields and unknown frame types on received messages. The `event` frame is such an addition: servers that do not know it ignore it, and the `x-peerband-features` upgrade header tells servers that do which clients emit events. A breaking change would use a new endpoint path or a `hello` negotiation message and be documented here with a bump of the schema `$id`. Schemas are published with each client release in `protocol/`.
 
 The tests in `test/protocol.test.ts` validate messages produced by the real relay client against these schemas.
+
+### Environment control (optional capability)
+
+A connector implementing environment tools advertises `environment-control` in
+the comma-separated `x-peerband-features` upgrade header, alongside `events` when
+available. A server must check this feature before routing `list_environment` or
+`control_environment`. The standard request/response envelope and 15-second
+request deadline are unchanged. Old servers can ignore the header value.
+
+Both tools require `principal.role: "owner"`, `environment:control` in the verified
+principal's scopes, and the local `enableEnvironmentControl` opt-in. Read-only
+mode and configured agent/workspace allowlists deny both tools. The server must
+resolve ownership and require an explicit installation before dispatch. Guest
+shares never grant environment authority.
+
+`list_environment` takes `{}` and returns `workspaces`, `tabs`, `panes` (at most 50
+each), with corresponding `workspacesTruncated`, `tabsTruncated`,
+`panesTruncated` booleans. Rows carry only selected, bounded metadata: IDs, labels,
+paths, agent kind and state. No terminal contents, argv, tokens or environment
+variables leave the machine through these tools.
+
+`control_environment` accepts camelCase arguments, as listed in the README action
+table (`workspaceId`, `tabId`, `paneId`, `idempotencyKey` on the wire). The connector
+independently validates the action-specific fields and the installed Herdr schema.
+Creation always sends `focus: false`; agent startup never accepts native arguments.
+A write returns a durable receipt, queried through `get_request_status`; successful
+receipts include bounded metadata in `result`, with camelCase result IDs. Receipt
+states and uncertainty rules match message delivery. Neither the relay nor the
+connector retries a mutation after disconnection or startup reconciliation.

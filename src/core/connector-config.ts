@@ -15,6 +15,7 @@ export interface ConnectorConfig {
   stateDirectory?: string;
   herdr?: HerdrConnectorSettings;
   enableWrites?: boolean;
+  enableEnvironmentControl?: boolean;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -43,7 +44,7 @@ function stringList(record: Record<string, unknown>, key: string, where: string)
 /** Validates a parsed connector.json value. Throws ConfigError on any problem. */
 export function parseConnectorConfig(value: unknown, source = 'connector config'): ConnectorConfig {
   if (!isRecord(value)) throw new ConfigError(`${source}: expected a JSON object.`);
-  rejectUnknown(value, ['allowedAgents', 'allowedWorkspaces', 'stateDirectory', 'herdr', 'enableWrites'], source);
+  rejectUnknown(value, ['allowedAgents', 'allowedWorkspaces', 'stateDirectory', 'herdr', 'enableWrites', 'enableEnvironmentControl'], source);
   const config: ConnectorConfig = {};
   const agents = stringList(value, 'allowedAgents', source);
   if (agents) config.allowedAgents = agents;
@@ -54,6 +55,10 @@ export function parseConnectorConfig(value: unknown, source = 'connector config'
   if (value.enableWrites !== undefined) {
     if (typeof value.enableWrites !== 'boolean') throw new ConfigError(`${source}.enableWrites must be true or false.`);
     config.enableWrites = value.enableWrites;
+  }
+  if (value.enableEnvironmentControl !== undefined) {
+    if (typeof value.enableEnvironmentControl !== 'boolean') throw new ConfigError(`${source}.enableEnvironmentControl must be a boolean.`);
+    config.enableEnvironmentControl = value.enableEnvironmentControl;
   }
   if (value.herdr !== undefined) {
     const raw = value.herdr;

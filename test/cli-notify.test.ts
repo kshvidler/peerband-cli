@@ -243,7 +243,7 @@ describe('peerband notify through the real relay helper', () => {
       for (let attempt = 0; attempt < 50 && !frames.some((frame) => frame.name === 'agent.notified'); attempt++) await pause(50);
       const note = frames.find((frame) => frame.name === 'agent.notified')!;
       expect(note).toMatchObject({ eventId: reply.eventId, data: { agentId: reply.agentId, text: 'Build green, token=[REDACTED]', audience: 'owner' } });
-      expect(headers[0]).toBe('events');
+      expect(headers[0]).toBe('events,environment-control');
       // --channel goes through the supervisor and the connector, which echo it back.
       const channels = channelServer();
       const addressed = await runCli(['notify', '--json', '--channel', 'deploys', 'Release is live'], { env: { PEERBAND_CONFIG_HOME: home }, overrides: { fetch: channels.fetch } });

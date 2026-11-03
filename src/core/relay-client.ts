@@ -160,7 +160,7 @@ export async function runRemoteClient(
           const socket = new WebSocket(serverUrl, {
             headers: {
               Authorization: `Bearer ${credentials.credential}`,
-              ...(options.events ? { "x-peerband-features": "events" } : {}),
+              "x-peerband-features": options.events ? "events,environment-control" : "environment-control",
             },
             maxPayload: MAX_FRAME,
             handshakeTimeout: 10_000,
@@ -282,7 +282,7 @@ export async function runRemoteClient(
               return;
             }
             const pending: Active = {
-              write: request.tool === "send_agent_message",
+              write: request.tool === "send_agent_message" || request.tool === "control_environment",
               socket,
               startedAt: Date.now(),
               tool: request.tool,
