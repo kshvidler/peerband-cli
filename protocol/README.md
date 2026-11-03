@@ -70,3 +70,9 @@ A write returns a durable receipt, queried through `get_request_status`; success
 receipts include bounded metadata in `result`, with camelCase result IDs. Receipt
 states and uncertainty rules match message delivery. Neither the relay nor the
 connector retries a mutation after disconnection or startup reconciliation.
+
+Connectors may additionally return an `actions` array from `list_environment`.
+Clients should require `agent.rename` in that list before offering agent-name
+changes. This action takes `{paneId, name, idempotencyKey}` and addresses Herdr
+by the explicit pane ID. Pane metadata includes the agent live `name` when known.
+Older connectors omit `actions` and keep their existing environment controls.

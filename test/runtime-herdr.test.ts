@@ -240,9 +240,11 @@ describe('Herdr environment control', () => {
     const { socketPath } = await fakeSocket((socket) => respond(socket, (request) => {
       requests.push(request);
       if (request.method === 'ping') return { type: 'pong', version: '0.9.3', protocol: 22 };
+      if (request.method === 'agent.list') return { type: 'agent_list', agents: [agentInfo('terminal-new')] };
       if (request.method === 'pane.list') return { type: 'pane_list', panes: [pane] };
       if (request.method === 'tab.create') return { type: 'tab_created', tab, root_pane: pane };
       if (request.method === 'agent.start') return { type: 'agent_started', agent: agentInfo('terminal-new'), argv: ['private-native-launch-details'] };
+      if (request.method === 'agent.rename') return { type: 'agent_info', agent: { ...agentInfo('terminal-new'), name: 'reviewer' } };
       return { type: 'ok' };
     }));
     const adapter = new HerdrAdapter({ schemaPath: fixture, socketPath });
@@ -254,6 +256,9 @@ describe('Herdr environment control', () => {
       expect(requests.find((r) => r.method === 'tab.create')?.params).toEqual({ workspace_id: 'workspace-1', cwd: '/project', label: 'New', focus: false });
       const started = await adapter.controlEnvironment({ action: 'agent.start', paneId: 'workspace-1-1', name: 'worker', kind: 'codex' });
       expect(started.agent).toMatchObject({ paneId: 'workspace-1-1' });
+      const renamed = await adapter.controlEnvironment({ action: 'agent.rename', paneId: 'workspace-1-1', name: 'reviewer' });
+      expect(renamed.agent).toMatchObject({ name: 'reviewer', paneId: 'workspace-1-1' });
+      expect(requests.find((r) => r.method === 'agent.rename')?.params).toEqual({ target: 'workspace-1-1', name: 'reviewer' });
       expect(JSON.stringify(started)).not.toContain('private-native-launch-details');
       expect(requests.find((r) => r.method === 'agent.start')?.params).toEqual({ pane_id: 'workspace-1-1', name: 'worker', kind: 'codex', timeout_ms: 8000 });
     } finally { await adapter.close(); }

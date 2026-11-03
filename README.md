@@ -313,6 +313,7 @@ cannot use these tools, even on a share that allows messages.
 | `workspace.create` | `cwd`, optional `label` |
 | `tab.create` | `workspace_id`, `cwd`, optional `label` |
 | `pane.split` | `pane_id`, `cwd`, `direction` (`right`, `down`, `left`, `up`) |
+| `agent.rename` | `pane_id`, `name` (a lowercase Herdr agent name) |
 | `agent.start` | `pane_id`, `name`, `kind` (for example `codex`, `claude`, `gemini`) |
 | `workspace.rename`, `tab.rename`, `pane.rename` | Matching ID and `label` |
 | `workspace.focus`, `tab.focus`, `pane.focus` | Matching ID |

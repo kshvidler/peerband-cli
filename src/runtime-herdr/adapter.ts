@@ -203,7 +203,8 @@ export class HerdrAdapter implements RuntimeAdapter {
     const result = asObject(await client.request(command.action, params));
     const expected = command.action === 'workspace.create' ? 'workspace_created'
       : command.action === 'tab.create' ? 'tab_created'
-      : command.action === 'agent.start' ? 'agent_started' : undefined;
+      : command.action === 'agent.start' ? 'agent_started'
+      : command.action === 'agent.rename' ? 'agent_info' : undefined;
     if (expected && result.type !== expected) throw this.schemaMismatch(`${command.action} returned an unexpected result type`);
     if (!expected && !['workspace_info', 'tab_info', 'pane_info', 'ok'].includes(result.type as string)) throw this.schemaMismatch(`${command.action} returned an unexpected result type`);
     return environmentMetadata(result);
