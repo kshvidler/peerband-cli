@@ -1,5 +1,5 @@
 import { ConnectError, sanitizeOutput } from '../core/core.js';
-import { environmentCommand, type EnvironmentCommand, type EnvironmentResult } from '../core/environment.js';
+import { ENVIRONMENT_ACTIONS, environmentCommand, type EnvironmentCommand, type EnvironmentResult } from '../core/environment.js';
 import type { HerdrSocketClient } from './socket-client.js';
 
 const FIELDS = ['workspace_id', 'tab_id', 'pane_id', 'name', 'label', 'cwd', 'agent', 'agent_status', 'type'] as const;
@@ -22,12 +22,17 @@ export function environmentMetadata(value: unknown): EnvironmentResult {
 }
 
 export async function listEnvironment(client: HerdrSocketClient): Promise<EnvironmentResult> {
-  const result: EnvironmentResult = {};
+  const result: EnvironmentResult = { actions: [...ENVIRONMENT_ACTIONS] };
   for (const [method, key] of [['workspace.list', 'workspaces'], ['tab.list', 'tabs'], ['pane.list', 'panes']] as const) {
     const response = await client.request(method, {}) as Record<string, unknown>;
     if (!Array.isArray(response[key])) throw new ConnectError('schema_mismatch', `Unexpected ${method} response.`, 'Check the installed Herdr schema.');
     // Explicit truncation keeps metadata under the relay frame limit on large sessions.
-    result[key] = response[key].slice(0, 50).map(metadata);
+    let rows = response[key] as Record<string, unknown>[];
+    if (key === 'panes') {
+      const listed = await client.request('agent.list', {}) as { agents?: Array<{ pane_id: string; name?: string }> };
+      rows = rows.map((pane) => ({ ...pane, name: listed.agents?.find((agent) => agent.pane_id === pane.pane_id)?.name }));
+    }
+    result[key] = rows.slice(0, 50).map(metadata);
     result[`${key}Truncated`] = response[key].length > 50;
   }
   if (Buffer.byteLength(JSON.stringify(result), 'utf8') > 48 * 1024) throw new ConnectError('response_too_large', 'The environment metadata exceeds the frame budget.', 'Reduce the session layout before listing it remotely.');
@@ -44,6 +49,10 @@ export function environmentParams(input: EnvironmentCommand): Record<string, unk
   if (['workspace.create', 'tab.create', 'pane.split'].includes(command.action)) params.focus = false;
   if (command.action === 'pane.split') {
     params.target_pane_id = params.pane_id;
+    delete params.pane_id;
+  }
+  if (command.action === 'agent.rename') {
+    params.target = params.pane_id;
     delete params.pane_id;
   }
   if (command.action === 'agent.start') params.timeout_ms = 8000;

@@ -3,7 +3,7 @@ import { ConnectError } from './core.js';
 export const ENVIRONMENT_ACTIONS = [
   'workspace.create', 'workspace.rename', 'workspace.focus',
   'tab.create', 'tab.rename', 'tab.focus',
-  'pane.split', 'pane.rename', 'pane.focus', 'agent.start',
+  'pane.split', 'pane.rename', 'pane.focus', 'agent.start', 'agent.rename',
 ] as const;
 export type EnvironmentAction = typeof ENVIRONMENT_ACTIONS[number];
 export interface EnvironmentCommand {
@@ -22,13 +22,13 @@ const FIELDS: Record<EnvironmentAction, string[]> = {
   'workspace.create': ['cwd', 'label'], 'workspace.rename': ['workspaceId', 'label'], 'workspace.focus': ['workspaceId'],
   'tab.create': ['workspaceId', 'cwd', 'label'], 'tab.rename': ['tabId', 'label'], 'tab.focus': ['tabId'],
   'pane.split': ['paneId', 'direction', 'cwd'], 'pane.rename': ['paneId', 'label'], 'pane.focus': ['paneId'],
-  'agent.start': ['paneId', 'name', 'kind'],
+  'agent.start': ['paneId', 'name', 'kind'], 'agent.rename': ['paneId', 'name'],
 };
 const REQUIRED: Record<EnvironmentAction, string[]> = {
   'workspace.create': ['cwd'], 'workspace.rename': ['workspaceId', 'label'], 'workspace.focus': ['workspaceId'],
   'tab.create': ['workspaceId', 'cwd'], 'tab.rename': ['tabId', 'label'], 'tab.focus': ['tabId'],
   'pane.split': ['paneId', 'direction', 'cwd'], 'pane.rename': ['paneId', 'label'], 'pane.focus': ['paneId'],
-  'agent.start': ['paneId', 'name', 'kind'],
+  'agent.start': ['paneId', 'name', 'kind'], 'agent.rename': ['paneId', 'name'],
 };
 const KINDS = new Set('pi claude codex gemini cursor devin agy cline omp mastracode opencode copilot kimi kiro droid amp grok hermes kilo qodercli qwen letta maki muse'.split(' '));
 function invalid(message: string): never {

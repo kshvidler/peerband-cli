@@ -93,6 +93,7 @@ it('validates every exposed action against the pinned Herdr request schema', asy
     { action: 'pane.rename', paneId: 'w1:p1', label: 'Worker' },
     { action: 'pane.focus', paneId: 'w1:p1' },
     { action: 'agent.start', paneId: 'w1:p1', name: 'worker', kind: 'codex' },
+    { action: 'agent.rename', paneId: 'w1:p1', name: 'renamed-worker' },
   ];
   for (const input of commands) {
     const command = environmentCommand(input);
@@ -116,4 +117,10 @@ it('reconciles an interrupted environment write to unknown without replaying it'
     expect(receipt).toMatchObject({ state: 'delivery_unknown', errorCode: 'process_restarted' });
     expect(restarted.adapter.controlEnvironment).not.toHaveBeenCalled();
   } finally { await restarted.core.close(); }
+});
+
+it('addresses agent rename by explicit pane and rejects native aliases or extra args', () => {
+  expect(environmentParams({ action: 'agent.rename', paneId: 'w1:p1', name: 'reviewer' })).toEqual({ target: 'w1:p1', name: 'reviewer' });
+  expect(() => environmentCommand({ action: 'agent.rename', name: 'reviewer' })).toThrow();
+  expect(() => environmentCommand({ action: 'agent.rename', paneId: 'w1:p1', name: 'not a valid name' })).toThrow();
 });
