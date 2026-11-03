@@ -134,7 +134,7 @@ describe('protocol schemas', () => {
     events.close();
     await core.close();
 
-    expect(connections.map((connection) => connection.features)).toEqual(['events', 'events']);
+    expect(connections.map((connection) => connection.features)).toEqual(['events,environment-control', 'events,environment-control']);
     expect(connections[0]!.frames.map((frame) => frame.name)).toEqual(['agents.changed', 'agent.status_changed', 'agent.notified']);
     expect(connections[1]!.frames.map((frame) => frame.name)).toEqual(['agents.changed']);
     expect(connections[0]!.frames[1]!.data).toEqual({ agentId: agents[1]!.id, status: 'working', previousStatus: 'idle', label: agents[1]!.label, workspace: agents[1]!.workspace, revision: null });

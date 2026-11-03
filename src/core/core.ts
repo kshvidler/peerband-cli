@@ -1,3 +1,4 @@
+import { environmentCommand, type EnvironmentCommand, type EnvironmentResult } from './environment.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, rmdir, unlink, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
@@ -57,6 +58,8 @@ export interface OutputResult {
 }
 
 export interface RuntimeAdapter {
+  listEnvironment?(): Promise<EnvironmentResult>;
+  controlEnvironment?(command: EnvironmentCommand): Promise<EnvironmentResult>;
   listAgents(): Promise<AgentRecord[]>;
   getAgent(id: string): Promise<AgentRecord>;
   readOutput(id: string, options: OutputOptions): Promise<OutputResult>;
@@ -243,6 +246,7 @@ export const labelRelayedMessage = (message: string, principal: Principal): stri
 
 export interface ConnectorCoreOptions {
   writesEnabled?: boolean;
+  environmentControlEnabled?: boolean;
   /** Prefix each delivered message with who sent it (relayMessageHeader). On for the relay connector. */
   labelMessages?: boolean;
   allowedAgents?: string[];
@@ -295,7 +299,8 @@ interface Receipt {
   machineId: string;
   targetId: string;
   workspace: string;
-  tool: 'send_agent_message';
+  tool: 'send_agent_message' | 'control_environment';
+  result?: EnvironmentResult;
   idempotencyHash: string;
   requestKeyHash: string;
   payloadHash: string;
@@ -324,6 +329,7 @@ export class ConnectorCore {
   private readonly receipts = new Map<string, Receipt>();
   private readonly idempotency = new Map<string, Receipt>();
   private readonly writesEnabled: boolean;
+  private readonly environmentControlEnabled: boolean;
   private readonly labelMessages: boolean;
   private readonly allowedAgents?: Set<string>;
   private readonly allowedWorkspaces?: Set<string>;
@@ -343,6 +349,7 @@ export class ConnectorCore {
 
   constructor(private readonly adapter: RuntimeAdapter, options: ConnectorCoreOptions = {}) {
     this.writesEnabled = options.writesEnabled ?? false;
+    this.environmentControlEnabled = options.environmentControlEnabled ?? false;
     this.labelMessages = options.labelMessages ?? false;
     this.allowedAgents = options.allowedAgents ? new Set(options.allowedAgents) : undefined;
     this.allowedWorkspaces = options.allowedWorkspaces ? new Set(options.allowedWorkspaces) : undefined;
@@ -367,6 +374,11 @@ export class ConnectorCore {
       this.validatePrincipal(principal);
       if (!isRecord(args)) throw new ConnectError('invalid_argument', 'Tool arguments must be an object.', 'Check the tool input and try again.');
       switch (tool) {
+        case 'list_environment':
+          assertKeys(args, []);
+          this.authorizeEnvironment(principal);
+          return await this.adapter.listEnvironment!();
+        case 'control_environment': return await this.controlEnvironment(args, principal);
         case 'list_agents': return await this.listAgents(args, principal);
         case 'get_agent_status': return await this.getStatus(args, principal);
         case 'get_agent_output': return await this.getOutput(args, principal);
@@ -516,6 +528,64 @@ export class ConnectorCore {
     });
   }
 
+  private authorizeEnvironment(principal: Principal): void {
+    this.requireScope(principal, 'environment:control');
+    if (principal.role !== 'owner') throw new ConnectError('forbidden', 'Environment controls are owner-only.', 'Use the account that owns this machine.');
+    if (!this.environmentControlEnabled || !this.writesEnabled) throw new ConnectError('write_disabled', 'Environment control is disabled on this machine.', 'Set "enableEnvironmentControl": true in connector.json and restart the relay without --read-only.');
+    // Agent/path allowlists cannot express authority to create new layout targets.
+    if (this.allowedAgents || this.allowedWorkspaces) throw new ConnectError('forbidden', 'Environment control is unavailable with agent or workspace allowlists.', 'Use a dedicated unrestricted connector after reviewing its environment-control permission.');
+    if (!this.adapter.listEnvironment || !this.adapter.controlEnvironment) throw new ConnectError('unsupported_capability', 'This runtime does not support environment control.', 'Use a compatible Herdr runtime.');
+  }
+
+  private async controlEnvironment(args: Record<string, unknown>, principal: Principal): Promise<Record<string, unknown>> {
+    this.authorizeEnvironment(principal);
+    const { idempotencyKey: key, ...input } = args;
+    const command = environmentCommand(input);
+    if (typeof key !== 'string' || key.length < 16 || key.length > 256) throw new ConnectError('invalid_argument', 'idempotencyKey must be 16 to 256 characters.', 'Provide a random key and reuse it only for the same operation.');
+    const principalHash = hash(principal.id);
+    const payloadHash = hash(canonical(command));
+    const requestKeyHash = hash(canonical([principalHash, 'control_environment', key]));
+    return this.withSubmissionLock(requestKeyHash, async () => {
+      const prior = this.idempotency.get(requestKeyHash);
+      if (prior) {
+        if (prior.payloadHash !== payloadHash) throw new ConnectError('idempotency_conflict', 'This key was used for a different operation.', 'Use a new key for a new operation.');
+        return this.publicReceipt(prior);
+      }
+      this.pruneReceipts();
+      if (this.receipts.size >= MAX_RECEIPTS) throw new ConnectError('receipt_limit', 'The receipt store is full.', 'Wait for old receipts to expire.');
+      const now = Date.now();
+      const receipt: Receipt = {
+        requestId: randomUUID(), principalHash, machineId: 'local-environment', targetId: command.paneId ?? command.tabId ?? command.workspaceId ?? 'new-workspace',
+        workspace: '', tool: 'control_environment', idempotencyHash: requestKeyHash, requestKeyHash, payloadHash,
+        state: 'queued', createdAt: now, updatedAt: now,
+      };
+      this.receipts.set(receipt.requestId, receipt);
+      this.idempotency.set(requestKeyHash, receipt);
+      try { await this.persist(); } catch {
+        this.receipts.delete(receipt.requestId);
+        this.idempotency.delete(requestKeyHash);
+        throw new ConnectError('receipt_store_unavailable', 'Could not save the receipt; nothing was dispatched.', 'Check local storage access.');
+      }
+      const job = (async () => {
+        receipt.state = 'dispatching';
+        try {
+          await this.persist();
+          receipt.result = await this.adapter.controlEnvironment!(command);
+          receipt.state = 'delivered';
+        } catch (error) {
+          // A runtime rejection or lost response must never trigger an automatic replay.
+          receipt.state = 'delivery_unknown';
+          receipt.errorCode = error instanceof ConnectError && SAFE_RECEIPT_ERRORS.has(error.code) ? error.code : 'runtime_unavailable';
+        }
+        receipt.updatedAt = Date.now();
+        await this.persist();
+      })().catch(() => undefined);
+      this.inFlight.add(job);
+      void job.finally(() => this.inFlight.delete(job));
+      return this.publicReceipt(receipt);
+    });
+  }
+
   private async withSubmissionLock<T>(key: string, action: () => Promise<T>): Promise<T> {
     const previous = this.submissionLocks.get(key) ?? Promise.resolve();
     let release!: () => void;
@@ -552,16 +622,18 @@ export class ConnectorCore {
 
   private async getRequestStatus(args: Record<string, unknown>, principal: Principal): Promise<Record<string, unknown>> {
     assertKeys(args, ['requestId']);
-    this.requireScope(principal, 'agents:read');
+    if (!principal.scopes.includes('environment:control')) this.requireScope(principal, 'agents:read');
     if (typeof args.requestId !== 'string' || args.requestId.length > 256) throw new ConnectError('invalid_argument', 'requestId is required.', 'Use the request ID returned by send_agent_message.');
     this.pruneReceipts();
     const receipt = this.receipts.get(args.requestId);
     if (!receipt || receipt.principalHash !== hash(principal.id)) throw new ConnectError('request_not_found', 'No request receipt is available for this caller.', 'Check the request ID or submit a new authorized request.');
+    if (receipt.tool === 'control_environment') this.authorizeEnvironment(principal);
+    else this.requireScope(principal, 'agents:read');
     return this.publicReceipt(receipt);
   }
 
   private publicReceipt(receipt: Receipt): Record<string, unknown> {
-    return { requestId: receipt.requestId, state: receipt.state, createdAt: new Date(receipt.createdAt).toISOString(), updatedAt: new Date(receipt.updatedAt).toISOString(), ...(receipt.errorCode ? { errorCode: receipt.errorCode } : {}) };
+    return { ...(receipt.result ? { result: receipt.result } : {}), requestId: receipt.requestId, state: receipt.state, createdAt: new Date(receipt.createdAt).toISOString(), updatedAt: new Date(receipt.updatedAt).toISOString(), ...(receipt.errorCode ? { errorCode: receipt.errorCode } : {}) };
   }
 
   private pruneReceipts(): void {
@@ -678,14 +750,15 @@ export class ConnectorCore {
 
   private isValidReceipt(value: unknown): value is Receipt {
     if (!isRecord(value)) return false;
-    const receiptKeys = ['requestId', 'principalHash', 'machineId', 'targetId', 'workspace', 'tool', 'idempotencyHash', 'requestKeyHash', 'payloadHash', 'state', 'createdAt', 'updatedAt', 'errorCode'];
+    const receiptKeys = ['requestId', 'principalHash', 'machineId', 'targetId', 'workspace', 'tool', 'idempotencyHash', 'requestKeyHash', 'payloadHash', 'state', 'createdAt', 'updatedAt', 'errorCode', 'result'];
     if (Object.keys(value).some((key) => !receiptKeys.includes(key))) return false;
     return typeof value.requestId === 'string' && value.requestId.length > 0 && value.requestId.length <= 256 &&
       typeof value.principalHash === 'string' && HASH_PATTERN.test(value.principalHash) &&
       typeof value.machineId === 'string' && value.machineId.length > 0 && value.machineId.length <= 512 &&
       typeof value.targetId === 'string' && value.targetId.length > 0 && value.targetId.length <= 256 &&
       typeof value.workspace === 'string' && value.workspace.length <= 2048 &&
-      value.tool === 'send_agent_message' &&
+      (value.tool === 'send_agent_message' || value.tool === 'control_environment') &&
+      (value.result === undefined || (isRecord(value.result) && JSON.stringify(value.result).length <= 16384)) &&
       typeof value.idempotencyHash === 'string' && HASH_PATTERN.test(value.idempotencyHash) &&
       typeof value.requestKeyHash === 'string' && HASH_PATTERN.test(value.requestKeyHash) &&
       typeof value.payloadHash === 'string' && HASH_PATTERN.test(value.payloadHash) &&

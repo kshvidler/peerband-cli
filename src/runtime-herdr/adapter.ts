@@ -1,3 +1,5 @@
+import type { EnvironmentCommand, EnvironmentResult } from '../core/environment.js';
+import { environmentMetadata, environmentParams, listEnvironment } from './environment.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -186,6 +188,25 @@ export class HerdrAdapter implements RuntimeAdapter {
     const { client } = await this.initialize();
     const result = asObject(await client.request('agent.prompt', { target, text: message }));
     if (result.type !== 'agent_prompted') throw this.schemaMismatch('agent.prompt returned an unexpected result type');
+  }
+
+  async listEnvironment(): Promise<EnvironmentResult> {
+    const { client } = await this.initialize();
+    return listEnvironment(client);
+  }
+
+  async controlEnvironment(command: EnvironmentCommand): Promise<EnvironmentResult> {
+    const params = environmentParams(command);
+    const { schema, client } = await this.initialize();
+    const request = { id: randomUUID(), method: command.action, params };
+    if (!schema.validateRequest(request)) throw new ConnectError('unsupported_capability', 'The installed Herdr API does not support this environment action.', 'Update Herdr and use its matching schema.');
+    const result = asObject(await client.request(command.action, params));
+    const expected = command.action === 'workspace.create' ? 'workspace_created'
+      : command.action === 'tab.create' ? 'tab_created'
+      : command.action === 'agent.start' ? 'agent_started' : undefined;
+    if (expected && result.type !== expected) throw this.schemaMismatch(`${command.action} returned an unexpected result type`);
+    if (!expected && !['workspace_info', 'tab_info', 'pane_info', 'ok'].includes(result.type as string)) throw this.schemaMismatch(`${command.action} returned an unexpected result type`);
+    return environmentMetadata(result);
   }
 
   async close(): Promise<void> {
