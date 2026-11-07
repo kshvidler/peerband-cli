@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { loadHerdrSchema } from '../src/runtime-herdr/index.js';
 import { environmentCommand } from '../src/core/environment.js';
 import { environmentMetadata, environmentParams } from '../src/runtime-herdr/environment.js';
+import { environmentControlEnabled } from '../src/cli/commands/shared.js';
 
 const owner = { id: 'owner', role: 'owner', scopes: ['agents:read', 'environment:control'] };
 const command = { action: 'tab.create', workspaceId: 'w1', cwd: '/project', label: 'Tests', idempotencyKey: 'environment-key-12345' };
@@ -123,4 +124,12 @@ it('addresses agent rename by explicit pane and rejects native aliases or extra 
   expect(environmentParams({ action: 'agent.rename', paneId: 'w1:p1', name: 'reviewer' })).toEqual({ target: 'w1:p1', name: 'reviewer' });
   expect(() => environmentCommand({ action: 'agent.rename', name: 'reviewer' })).toThrow();
   expect(() => environmentCommand({ action: 'agent.rename', paneId: 'w1:p1', name: 'not a valid name' })).toThrow();
+});
+
+it('turns environment control on by default and off only when asked', () => {
+  expect(environmentControlEnabled({})).toBe(true);
+  expect(environmentControlEnabled({ enableEnvironmentControl: true })).toBe(true);
+  expect(environmentControlEnabled({ enableEnvironmentControl: false })).toBe(false);
+  expect(environmentControlEnabled({}, { disable: true })).toBe(false);
+  expect(environmentControlEnabled({ enableEnvironmentControl: false }, { enable: true })).toBe(true);
 });

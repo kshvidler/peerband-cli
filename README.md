@@ -283,15 +283,16 @@ Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Contributions: [CONTRIB
 The MCP tools `list_environment` and `control_environment` let the machine owner
 open a workspace or tab, split a pane, rename or focus layout items, and start an
 agent without messaging an existing agent first. They require a separate
-`environment:control` OAuth grant and explicit machine opt-in. Existing read and
+`environment:control` OAuth grant. Existing read and
 message grants do not gain this permission; reconnect an MCP client that requests
 the new scope and approve its consent screen. Legacy personal MCP tokens do not
 have environment-control access.
 
-Set `"enableEnvironmentControl": true` in your `connector.json` and restart the
-PeerBand Relay tab. For a foreground connection, use
-`peerband connect --enable-environment-control`. `--read-only` or
-`"enableWrites": false` disables all environment controls. Environment controls
+Environment controls are on by default. To turn them off on a machine, set
+`"enableEnvironmentControl": false` in your `connector.json` and restart the
+PeerBand Relay tab; for a foreground connection, use
+`peerband connect --disable-environment-control`. `--read-only` or
+`"enableWrites": false` also disables all environment controls. Environment controls
 are unavailable when `allowedAgents` or `allowedWorkspaces` is configured, since
 those allowlists cannot authorize creating new layout targets. Shared users
 cannot use these tools, even on a share that allows messages.

@@ -1,10 +1,19 @@
 name: release
-# Manual releases only. A tag push is deliberately NOT a trigger: the release
-# tag points at a commit that contains the built dist/ (which is gitignored on
-# main), so the tag has to be created by this workflow, and a workflow that
-# reacts to its own tag push would loop or race. Run it from main with the
-# version that is already in package.json.
+# Releases run automatically when a version bump lands on main: a push to main
+# that changes package.json releases its version if the tag v<version> does not
+# exist yet (any other push to main is a no-op after a few seconds). It can also
+# be run by hand from main with the version already in package.json.
+#
+# A tag push is deliberately NOT a trigger: the release tag points at a commit
+# that contains the built dist/ (which is gitignored on main), so the tag is
+# created by this workflow, and a workflow that reacted to its own tag push
+# would loop or race.
+#
+# npm trusted publishing (OIDC) is bound to this file name: keep it release.yml.
 on:
+  push:
+    branches: [main]
+    paths: [package.json]
   workflow_dispatch:
     inputs:
       version:
@@ -17,7 +26,36 @@ concurrency:
   group: release
   cancel-in-progress: false
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      release: ${{ steps.plan.outputs.release }}
+      version: ${{ steps.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decide whether this version still needs a release
+        id: plan
+        env:
+          REQUESTED: ${{ inputs.version }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ -n "$REQUESTED" ] && [ "$REQUESTED" != "$version" ]; then
+            echo "::error::Requested version $REQUESTED does not match package.json version $version"
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null 2>&1; then
+            if [ -n "$REQUESTED" ]; then echo "::error::Tag v$version already exists"; exit 1; fi
+            echo "v$version is already released; nothing to do."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Releasing v$version."
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
   verify:
+    needs: plan
+    if: needs.plan.outputs.release == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -26,19 +64,10 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Check requested version matches package.json
-        env:
-          REQUESTED: ${{ inputs.version }}
-        run: |
-          actual=$(node -p "require('./package.json').version")
-          if [ "$REQUESTED" != "$actual" ]; then
-            echo "::error::Requested version $REQUESTED does not match package.json version $actual"
-            exit 1
-          fi
       - run: npm ci
       - run: npm run check
   tag:
-    needs: verify
+    needs: [plan, verify]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -53,7 +82,7 @@ jobs:
       - run: npm run build
       - name: Commit dist/ on a detached HEAD and push only the tag
         env:
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ needs.plan.outputs.version }}
         run: |
           if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
             echo "::error::Tag v$VERSION already exists"
@@ -67,7 +96,7 @@ jobs:
           git tag -a "v$VERSION" -m "Release v$VERSION"
           git push origin "refs/tags/v$VERSION"
   publish:
-    needs: tag
+    needs: [plan, tag]
     # Trusted publishing needs a public repository (npm provenance requirement).
     if: github.event.repository.private == false
     runs-on: ubuntu-latest
@@ -78,7 +107,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: v${{ inputs.version }}
+          ref: v${{ needs.plan.outputs.version }}
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -88,7 +117,7 @@ jobs:
       # attaches provenance automatically.
       - run: npm publish --access public
   github-release:
-    needs: tag
+    needs: [plan, tag]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -96,18 +125,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: v${{ inputs.version }}
+          ref: v${{ needs.plan.outputs.version }}
       - name: Create the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ needs.plan.outputs.version }}
         run: |
           (cd install && sha256sum install.sh install.ps1) > SHA256SUMS
           cat SHA256SUMS
           gh release create "v$VERSION" install/install.sh install/install.ps1 SHA256SUMS \
             --title "PeerBand v$VERSION" --generate-notes --verify-tag
   notice:
-    needs: tag
+    needs: [plan, tag]
     if: github.event.repository.private == true
     runs-on: ubuntu-latest
     timeout-minutes: 10

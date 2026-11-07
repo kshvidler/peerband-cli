@@ -60,6 +60,13 @@ export function writesEnabled(config: ConnectorConfig, flags: { readOnly?: boole
   return config.enableWrites !== false;
 }
 
+/** Environment controls are on by default; --disable-environment-control or "enableEnvironmentControl": false turns them off. */
+export function environmentControlEnabled(config: ConnectorConfig, flags: { disable?: boolean; enable?: boolean } = {}): boolean {
+  if (flags.disable) return false;
+  if (flags.enable) return true;
+  return config.enableEnvironmentControl !== false;
+}
+
 export const SKILL_COMMAND = 'peerband skill';
 
 /** Suggestion at the end of login and relay, until the skill is installed. */

@@ -51,7 +51,7 @@ available. A server must check this feature before routing `list_environment` or
 request deadline are unchanged. Old servers can ignore the header value.
 
 Both tools require `principal.role: "owner"`, `environment:control` in the verified
-principal's scopes, and the local `enableEnvironmentControl` opt-in. Read-only
+principal's scopes, and local environment control not being turned off (`enableEnvironmentControl` defaults to true). Read-only
 mode and configured agent/workspace allowlists deny both tools. The server must
 resolve ownership and require an explicit installation before dispatch. Guest
 shares never grant environment authority.

@@ -531,7 +531,7 @@ export class ConnectorCore {
   private authorizeEnvironment(principal: Principal): void {
     this.requireScope(principal, 'environment:control');
     if (principal.role !== 'owner') throw new ConnectError('forbidden', 'Environment controls are owner-only.', 'Use the account that owns this machine.');
-    if (!this.environmentControlEnabled || !this.writesEnabled) throw new ConnectError('write_disabled', 'Environment control is disabled on this machine.', 'Set "enableEnvironmentControl": true in connector.json and restart the relay without --read-only.');
+    if (!this.environmentControlEnabled || !this.writesEnabled) throw new ConnectError('write_disabled', 'Environment control is disabled on this machine.', 'Remove "enableEnvironmentControl": false and "enableWrites": false from connector.json (or drop --disable-environment-control / --read-only) and restart the relay.');
     // Agent/path allowlists cannot express authority to create new layout targets.
     if (this.allowedAgents || this.allowedWorkspaces) throw new ConnectError('forbidden', 'Environment control is unavailable with agent or workspace allowlists.', 'Use a dedicated unrestricted connector after reviewing its environment-control permission.');
     if (!this.adapter.listEnvironment || !this.adapter.controlEnvironment) throw new ConnectError('unsupported_capability', 'This runtime does not support environment control.', 'Use a compatible Herdr runtime.');
