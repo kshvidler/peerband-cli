@@ -95,6 +95,9 @@ it('validates every exposed action against the pinned Herdr request schema', asy
     { action: 'pane.focus', paneId: 'w1:p1' },
     { action: 'agent.start', paneId: 'w1:p1', name: 'worker', kind: 'codex' },
     { action: 'agent.rename', paneId: 'w1:p1', name: 'renamed-worker' },
+    { action: 'workspace.close', workspaceId: 'w1' },
+    { action: 'tab.close', tabId: 'w1:t1' },
+    { action: 'pane.close', paneId: 'w1:p1' },
   ];
   for (const input of commands) {
     const command = environmentCommand(input);
@@ -124,6 +127,15 @@ it('addresses agent rename by explicit pane and rejects native aliases or extra 
   expect(environmentParams({ action: 'agent.rename', paneId: 'w1:p1', name: 'reviewer' })).toEqual({ target: 'w1:p1', name: 'reviewer' });
   expect(() => environmentCommand({ action: 'agent.rename', name: 'reviewer' })).toThrow();
   expect(() => environmentCommand({ action: 'agent.rename', paneId: 'w1:p1', name: 'not a valid name' })).toThrow();
+});
+
+it('closes only the explicitly named item and never the whole group', () => {
+  expect(environmentParams({ action: 'workspace.close', workspaceId: 'w1' })).toEqual({ workspace_id: 'w1' });
+  expect(environmentParams({ action: 'tab.close', tabId: 'w1:t1' })).toEqual({ tab_id: 'w1:t1' });
+  expect(environmentParams({ action: 'pane.close', paneId: 'w1:p1' })).toEqual({ pane_id: 'w1:p1' });
+  expect(() => environmentCommand({ action: 'workspace.close' })).toThrow();
+  expect(() => environmentCommand({ action: 'workspace.close', workspaceId: 'w1', closeGroup: 'true' })).toThrow();
+  expect(() => environmentCommand({ action: 'tab.close', paneId: 'w1:p1' })).toThrow();
 });
 
 it('turns environment control on by default and off only when asked', () => {
