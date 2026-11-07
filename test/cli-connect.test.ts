@@ -85,10 +85,13 @@ describe('peerband connect --managed', () => {
     const relay = await startMockRelay(relayScript());
     const home = await loggedIn(relay.url);
     const child = fork(DIST, ['connect', '--managed', '--runtime', 'mock'], { env: childEnv(home), silent: true });
+    let stderr = '';
+    child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
     const exited = new Promise<number | null>((resolve) => child.once('exit', resolve));
     await new Promise<void>((resolve) => child.on('message', (message) => (message as Record<string, unknown>).state === 'connected' && resolve()));
     child.disconnect();
-    expect(await exited).toBe(0);
+    const code = await exited;
+    expect(code, `connector stderr: ${stderr}`).toBe(0);
   });
 
   it('validates runtime and connector config', async () => {

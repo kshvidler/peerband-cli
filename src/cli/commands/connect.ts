@@ -125,6 +125,20 @@ function startMockStatusCycle(adapter: MockRuntime, env: NodeJS.ProcessEnv): () 
   return () => clearInterval(timer);
 }
 
+/**
+ * Sends to the plugin supervisor over IPC. The parent can disconnect while a message is
+ * still queued; without a callback Node reports that as an unhandled 'error' event and the
+ * connector exits 1 instead of shutting down cleanly, so send errors are dropped here.
+ */
+function sendToParent(message: Record<string, unknown>): void {
+  if (!process.connected || !process.send) return;
+  try {
+    process.send(message, undefined, undefined, () => undefined);
+  } catch {
+    // The channel closed between the check and the send.
+  }
+}
+
 function isShutdownMessage(message: unknown): boolean {
   return (
     Boolean(message) &&
@@ -183,8 +197,8 @@ export async function connect(options: ConnectOptions, ctx: Ctx): Promise<number
     const notify = notifyRequest(message);
     if (notify) {
       void events.notify(notify).then(
-        (result) => process.send?.({ type: 'peerband:notify-result', id: notify.id, ok: true, ...result }),
-        (error: unknown) => process.send?.({
+        (result) => sendToParent({ type: 'peerband:notify-result', id: notify.id, ok: true, ...result }),
+        (error: unknown) => sendToParent({
           type: 'peerband:notify-result',
           id: notify.id,
           ok: false,
@@ -203,7 +217,7 @@ export async function connect(options: ConnectOptions, ctx: Ctx): Promise<number
     process.once('disconnect', onDisconnect);
   }
   const sendPaneEvent = (event: Record<string, unknown>) => {
-    if (ipc && process.connected) process.send?.({ type: 'peerband:pane-event', ...event });
+    if (ipc) sendToParent({ type: 'peerband:pane-event', ...event });
   };
 
   let lastState: ConnectionState | undefined;
