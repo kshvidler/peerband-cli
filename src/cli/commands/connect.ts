@@ -15,7 +15,7 @@ import { HerdrAdapter } from '../../runtime-herdr/index.js';
 import { flag, str } from '../args.js';
 import { sanitize, symbols, type Style } from '../output.js';
 import { CliError, type CommandSpec, type Ctx, UsageError } from '../types.js';
-import { describeMachine, loadMachineConnectorConfig, requireCredentials, writesEnabled } from './shared.js';
+import { describeMachine, loadMachineConnectorConfig, requireCredentials, environmentControlEnabled, writesEnabled } from './shared.js';
 
 type ConnectionState = Parameters<NonNullable<RemoteOptions['onConnectionState']>>[0];
 type Activity = Parameters<NonNullable<RemoteOptions['onActivity']>>[0];
@@ -63,7 +63,8 @@ export const spec: CommandSpec = {
     'Connects this machine to PeerBand and serves agent requests from your MCP clients until you press Ctrl+C. MCP clients may send messages to agents by default, but only after you approve the agents:message consent when you connect them; pass --read-only (or set "enableWrites": false in connector.json) to make this machine read-only. Activity lines show metadata only (tool, target, outcome, latency), never message or output content. Most people use `peerband relay` instead, which runs the connector inside Herdr.',
   options: [
     { name: 'runtime', type: 'string', valueName: 'herdr|mock', description: 'Agent runtime. Default: $PEERBAND_RUNTIME or herdr. "mock" serves fake agents for testing.' },
-    { name: 'enable-environment-control', type: 'boolean', description: 'Allow owner-only Herdr environment tools with separate environment:control consent. Off by default; also enableEnvironmentControl in connector.json.' },
+    { name: 'disable-environment-control', type: 'boolean', description: 'Turn off the owner-only Herdr environment tools (open tabs and panes, start agents) on this machine (also: "enableEnvironmentControl": false in connector.json). They are on by default and still need the environment:control consent.' },
+    { name: 'enable-environment-control', type: 'boolean', description: 'Redundant: environment controls are on by default. Kept so old scripts keep working.' },
     { name: 'read-only', type: 'boolean', description: 'Do not allow MCP clients to send messages to agents on this machine (also: "enableWrites": false in connector.json).' },
     { name: 'enable-writes', type: 'boolean', description: 'Redundant: sending messages is allowed by default. Kept so old scripts keep working.' },
     { name: 'config', type: 'string', valueName: 'PATH', description: 'Connector config file. Default: $PEERBAND_CONNECTOR_CONFIG or connector.json in the config directory (optional).' },
@@ -82,6 +83,7 @@ export const spec: CommandSpec = {
         enableWrites: flag(parsed, 'enable-writes'),
         readOnly: flag(parsed, 'read-only'),
         enableEnvironmentControl: flag(parsed, 'enable-environment-control'),
+        disableEnvironmentControl: flag(parsed, 'disable-environment-control'),
         config: str(parsed, 'config'),
         server: str(parsed, 'server'),
         managed: flag(parsed, 'managed'),
@@ -96,6 +98,7 @@ export interface ConnectOptions {
   enableWrites?: boolean;
   readOnly?: boolean;
   enableEnvironmentControl?: boolean;
+  disableEnvironmentControl?: boolean;
   config?: string;
   server?: string;
   managed?: boolean;
@@ -138,6 +141,7 @@ export async function connect(options: ConnectOptions, ctx: Ctx): Promise<number
   const credentials = await requireCredentials(ctx);
   if (options.server) credentials.serverUrl = validateServerUrl(options.server);
   if (options.readOnly && options.enableWrites) throw new UsageError('--read-only and --enable-writes contradict each other.', 'Use --read-only to turn messaging off; messaging is on by default.');
+  if (options.disableEnvironmentControl && options.enableEnvironmentControl) throw new UsageError('--disable-environment-control and --enable-environment-control contradict each other.', 'Use --disable-environment-control to turn environment controls off; they are on by default.');
   const config = await loadMachineConnectorConfig(ctx, options.config);
   const enableWrites = writesEnabled(config, { readOnly: options.readOnly, enableWrites: options.enableWrites });
   const managed = Boolean(options.managed);
@@ -147,7 +151,7 @@ export async function connect(options: ConnectOptions, ctx: Ctx): Promise<number
   const adapter: RuntimeAdapter = runtime === 'mock' ? new MockRuntime() : new HerdrAdapter(config.herdr ?? {});
   const core = new ConnectorCore(adapter, {
     writesEnabled: enableWrites,
-    environmentControlEnabled: options.enableEnvironmentControl || config.enableEnvironmentControl,
+    environmentControlEnabled: environmentControlEnabled(config, { disable: options.disableEnvironmentControl, enable: options.enableEnvironmentControl }),
     labelMessages: true,
     allowedAgents: config.allowedAgents,
     allowedWorkspaces: config.allowedWorkspaces,
