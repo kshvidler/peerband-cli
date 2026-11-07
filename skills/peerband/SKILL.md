@@ -109,8 +109,10 @@ with `get_request_status`, then `agent.start` in its `result.rootPane.paneId`
 (`pane_id`, `name`, `kind`). Next call `list_agents` for a PeerBand agent ID and
 `send_agent_message` for its task. Other supported actions create workspaces,
 split panes, and rename or focus workspaces/tabs/panes. Creation preserves focus.
+`workspace.close`, `tab.close` and `pane.close` end everything running there:
+use them only when the owner explicitly asks to close that exact item.
 
 Each control needs a fresh random idempotency key; reuse that key for retries of
 the identical operation. Inspect receipts before continuing a dependent action.
 `delivery_unknown` requires inspection, never an automatic retry with a new key.
-No shell, raw keys, agent flags, stop/close or permission approvals are exposed.
+No shell, raw keys, agent flags or permission approvals are exposed.

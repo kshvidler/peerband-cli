@@ -205,6 +205,11 @@ export class HerdrAdapter implements RuntimeAdapter {
       : command.action === 'tab.create' ? 'tab_created'
       : command.action === 'agent.start' ? 'agent_started'
       : command.action === 'agent.rename' ? 'agent_info' : undefined;
+    // Closing returns either an acknowledgement or the matching closed event.
+    if (command.action.endsWith('.close')) {
+      if (!['ok', 'workspace_closed', 'tab_closed', 'pane_closed'].includes(result.type as string)) throw this.schemaMismatch(`${command.action} returned an unexpected result type`);
+      return environmentMetadata(result);
+    }
     if (expected && result.type !== expected) throw this.schemaMismatch(`${command.action} returned an unexpected result type`);
     if (!expected && !['workspace_info', 'tab_info', 'pane_info', 'ok'].includes(result.type as string)) throw this.schemaMismatch(`${command.action} returned an unexpected result type`);
     return environmentMetadata(result);

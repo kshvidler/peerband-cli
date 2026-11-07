@@ -261,6 +261,11 @@ describe('Herdr environment control', () => {
       expect(requests.find((r) => r.method === 'agent.rename')?.params).toEqual({ target: 'workspace-1-1', name: 'reviewer' });
       expect(JSON.stringify(started)).not.toContain('private-native-launch-details');
       expect(requests.find((r) => r.method === 'agent.start')?.params).toEqual({ pane_id: 'workspace-1-1', name: 'worker', kind: 'codex', timeout_ms: 8000 });
+      await adapter.controlEnvironment({ action: 'pane.close', paneId: 'workspace-1-1' });
+      expect(requests.find((r) => r.method === 'pane.close')?.params).toEqual({ pane_id: 'workspace-1-1' });
+      await adapter.controlEnvironment({ action: 'tab.close', tabId: 'workspace-1:1' });
+      expect(requests.find((r) => r.method === 'tab.close')?.params).toEqual({ tab_id: 'workspace-1:1' });
+      expect((await adapter.listEnvironment()).actions).toEqual(expect.arrayContaining(['workspace.close', 'tab.close', 'pane.close']));
     } finally { await adapter.close(); }
   });
 });

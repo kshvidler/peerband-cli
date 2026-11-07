@@ -75,4 +75,7 @@ Connectors may additionally return an `actions` array from `list_environment`.
 Clients should require `agent.rename` in that list before offering agent-name
 changes. This action takes `{paneId, name, idempotencyKey}` and addresses Herdr
 by the explicit pane ID. Pane metadata includes the agent live `name` when known.
+Clients should likewise require `workspace.close`, `tab.close` or `pane.close`
+before offering to delete a space, tab or pane. Each takes only the matching
+explicit ID and closes it in Herdr, ending whatever runs there.
 Older connectors omit `actions` and keep their existing environment controls.
