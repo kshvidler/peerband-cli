@@ -56,5 +56,7 @@ export function environmentParams(input: EnvironmentCommand): Record<string, unk
     delete params.pane_id;
   }
   if (command.action === 'agent.start') params.timeout_ms = 8000;
+  // Typed like a command at the prompt: the text, then Enter.
+  if (command.action === 'pane.send_input') params.keys = ['Enter'];
   return params;
 }

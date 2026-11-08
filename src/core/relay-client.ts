@@ -367,15 +367,21 @@ export async function runRemoteClient(
           socket.once("error", (error) => {
             if (socket.readyState !== WebSocket.OPEN) reject(error);
           });
+          // With this listener attached, ws does not abort the handshake itself, so
+          // this attempt must end here. Otherwise any non-upgrade reply (a 502 while
+          // the server restarts) leaves the connector waiting forever.
           socket.once("unexpected-response", (_request, response) => {
-            if (response.statusCode === 401 || response.statusCode === 403) {
+            const code = response.statusCode ?? 0;
+            response.resume();
+            if (code === 401 || code === 403) {
               stopped = true;
               setConnectionState("revoked");
               status(
-                `remote authentication was rejected (${response.statusCode}); re-enroll this installation if it was revoked.`,
+                `remote authentication was rejected (${code}); re-enroll this installation if it was revoked.`,
               );
             }
-            response.resume();
+            reject(new Error(`the server answered HTTP ${code || "error"} instead of connecting`));
+            socket.terminate();
           });
           socket.once("close", (code, reason) => {
             if (heartbeatTimer) clearInterval(heartbeatTimer);
@@ -394,7 +400,7 @@ export async function runRemoteClient(
           });
         });
       } catch (error) {
-        setConnectionState("remote-unavailable");
+        if (!stopped) setConnectionState("remote-unavailable");
         status(`remote connection failed: ${(error as Error).message}`);
       }
       if (stopped) break;

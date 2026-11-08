@@ -166,6 +166,81 @@ describe("hosted remote connector", () => {
     await core.close();
   });
 
+  it("keeps reconnecting when the server answers the upgrade with an HTTP error, as during a restart", async () => {
+    const server = createServer();
+    const wss = new WebSocketServer({ noServer: true });
+    let upgrades = 0;
+    server.on("upgrade", (request, socket, head) => {
+      upgrades += 1;
+      if (upgrades === 1) {
+        socket.end("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        return;
+      }
+      wss.handleUpgrade(request, socket, head, (ws) => wss.emit("connection", ws, request));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("No test listener address");
+    const connected = new Promise<void>((resolve) => wss.once("connection", () => resolve()));
+    const abort = new AbortController();
+    const core = new ConnectorCore(new MockRuntime());
+    const states: string[] = [];
+    const running = runRemoteClient(
+      core,
+      { serverUrl: `http://127.0.0.1:${address.port}`, installationId: "i", credential: "c" },
+      {
+        signal: abort.signal,
+        random: () => 0,
+        sleep: (ms) => new Promise((resolve) => setTimeout(resolve, Math.min(ms, 20))),
+        onStatus: () => {},
+        onConnectionState: (state) => states.push(state),
+      },
+    );
+    try {
+      await Promise.race([
+        connected,
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("connector did not retry after HTTP 502")), 3_000)),
+      ]);
+      expect(upgrades).toBe(2);
+      expect(states).toContain("remote-unavailable");
+      expect(states).not.toContain("revoked");
+    } finally {
+      abort.abort();
+      await running;
+      await core.close();
+      await new Promise<void>((resolve) => { wss.close(); server.close(() => resolve()); });
+    }
+  });
+
+  it("stops for good when the server rejects the credential", async () => {
+    const server = createServer();
+    let upgrades = 0;
+    server.on("upgrade", (_request, socket) => {
+      upgrades += 1;
+      socket.end("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("No test listener address");
+    const core = new ConnectorCore(new MockRuntime());
+    const states: string[] = [];
+    try {
+      await Promise.race([
+        runRemoteClient(
+          core,
+          { serverUrl: `http://127.0.0.1:${address.port}`, installationId: "i", credential: "c" },
+          { random: () => 0, sleep: (ms) => new Promise((resolve) => setTimeout(resolve, Math.min(ms, 20))), onStatus: () => {}, onConnectionState: (state) => states.push(state) },
+        ),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("connector hung after HTTP 403")), 3_000)),
+      ]);
+      expect(upgrades).toBe(1);
+      expect(states.at(-1)).toBe("revoked");
+    } finally {
+      await core.close();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("closes a socket when the backend heartbeat goes stale", async () => {
     const server = createServer();
     const wss = new WebSocketServer({ noServer: true });

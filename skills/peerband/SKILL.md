@@ -111,6 +111,8 @@ with `get_request_status`, then `agent.start` in its `result.rootPane.paneId`
 split panes, and rename or focus workspaces/tabs/panes. Creation preserves focus.
 `workspace.close`, `tab.close` and `pane.close` end everything running there:
 use them only when the owner explicitly asks to close that exact item.
+`pane.send_input` types a line into a pane and presses Enter; in a shell that runs
+a command. Use it only for a command the owner gave you for that exact pane.
 
 Each control needs a fresh random idempotency key; reuse that key for retries of
 the identical operation. Inspect receipts before continuing a dependent action.

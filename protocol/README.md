@@ -78,4 +78,15 @@ by the explicit pane ID. Pane metadata includes the agent live `name` when known
 Clients should likewise require `workspace.close`, `tab.close` or `pane.close`
 before offering to delete a space, tab or pane. Each takes only the matching
 explicit ID and closes it in Herdr, ending whatever runs there.
+Clients should require `pane.send_input` before offering to type into a pane. It
+takes `{paneId, text, idempotencyKey}`: one line of at most 4096 characters with
+no control characters, which the connector types into that pane followed by Enter.
+In a plain shell this runs a command, so servers should expose it only where the
+owner types it themselves (the dashboard), not to remote agents by default.
+
+`read_pane` takes `{paneId, lines?, bytes?}` and returns the pane's recent text in
+the same shape as `get_agent_output` (`text`, `truncated`, `observedAt`,
+`untrusted`), for any pane in the layout, agents and plain shells alike. It needs
+the same owner role, scope and local opt-in as the other environment tools.
+Connectors without it answer `unsupported_capability`.
 Older connectors omit `actions` and keep their existing environment controls.

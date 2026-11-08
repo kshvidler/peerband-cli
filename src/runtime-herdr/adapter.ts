@@ -169,6 +169,15 @@ export class HerdrAdapter implements RuntimeAdapter {
     return { ...output, ...(visibleOnly ? { source: 'visible' as const } : {}), truncated: visibleOnly || output.truncated || (result.read as { truncated?: boolean }).truncated === true, observedAt: new Date().toISOString(), untrusted: true };
   }
 
+  async readPane(paneId: string, options: OutputOptions = {}): Promise<OutputResult> {
+    const lines = clampInteger(options.lines, 80, 1, 500);
+    const { client } = await this.initialize();
+    const result = asObject(await client.request('pane.read', { pane_id: paneId, source: 'recent', format: 'text', lines, strip_ansi: true }));
+    if (result.type !== 'pane_read' || !result.read || typeof result.read !== 'object' || typeof (result.read as { text?: unknown }).text !== 'string') throw this.schemaMismatch('pane.read returned an unexpected result type');
+    const output = sanitizeOutput((result.read as { text: string }).text, { ...options, lines, bytes: clampInteger(options.bytes, 16_384, 1, 32_768) });
+    return { ...output, truncated: output.truncated || (result.read as { truncated?: boolean }).truncated === true, observedAt: new Date().toISOString(), untrusted: true };
+  }
+
   async sendMessage(id: string, message: string): Promise<void> {
     if (typeof message !== 'string' || message.length === 0 || Buffer.byteLength(message, 'utf8') > 16_384) {
       throw new ConnectError('invalid_argument', 'Message must contain 1 to 16384 UTF-8 bytes.', 'Shorten the message and try again.');

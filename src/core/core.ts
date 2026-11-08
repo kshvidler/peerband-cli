@@ -60,6 +60,8 @@ export interface OutputResult {
 export interface RuntimeAdapter {
   listEnvironment?(): Promise<EnvironmentResult>;
   controlEnvironment?(command: EnvironmentCommand): Promise<EnvironmentResult>;
+  /** Recent text of any pane by its layout id, agents and plain shells alike (owner environment control). */
+  readPane?(paneId: string, options: OutputOptions): Promise<OutputResult>;
   listAgents(): Promise<AgentRecord[]>;
   getAgent(id: string): Promise<AgentRecord>;
   readOutput(id: string, options: OutputOptions): Promise<OutputResult>;
@@ -379,6 +381,7 @@ export class ConnectorCore {
           this.authorizeEnvironment(principal);
           return await this.adapter.listEnvironment!();
         case 'control_environment': return await this.controlEnvironment(args, principal);
+        case 'read_pane': return await this.readPane(args, principal);
         case 'list_agents': return await this.listAgents(args, principal);
         case 'get_agent_status': return await this.getStatus(args, principal);
         case 'get_agent_output': return await this.getOutput(args, principal);
@@ -478,6 +481,21 @@ export class ConnectorCore {
     const result = await this.adapter.readOutput(agent.id, options);
     const safe = sanitizeOutput(result.text, options);
     return { ...safe, ...(result.source === 'visible' ? { source: result.source } : {}), observedAt: result.observedAt, truncated: safe.truncated || result.truncated, ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}) };
+  }
+
+  /** Owner-only read of any pane in the layout, so plain shells can be followed like agents. */
+  private async readPane(args: Record<string, unknown>, principal: Principal): Promise<Record<string, unknown>> {
+    assertKeys(args, ['paneId', 'lines', 'bytes']);
+    this.authorizeEnvironment(principal);
+    if (typeof args.paneId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9:_-]{0,255}$/.test(args.paneId)) throw new ConnectError('invalid_argument', 'paneId is required.', 'Use a pane ID returned by list_environment.');
+    if (!this.adapter.readPane) throw new ConnectError('unsupported_capability', 'This runtime cannot read panes.', 'Use a compatible Herdr runtime.');
+    const options: OutputOptions = {
+      lines: safeInteger(args.lines, 100, 1, MAX_OUTPUT_LINES, 'lines'),
+      bytes: safeInteger(args.bytes, 8 * 1024, 1, MAX_OUTPUT_BYTES, 'bytes'),
+    };
+    const result = await this.adapter.readPane(args.paneId, options);
+    const safe = sanitizeOutput(result.text, options);
+    return { ...safe, observedAt: result.observedAt, truncated: safe.truncated || result.truncated };
   }
 
   private async sendMessage(args: Record<string, unknown>, principal: Principal): Promise<Record<string, unknown>> {
