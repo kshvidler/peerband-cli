@@ -98,6 +98,7 @@ it('validates every exposed action against the pinned Herdr request schema', asy
     { action: 'workspace.close', workspaceId: 'w1' },
     { action: 'tab.close', tabId: 'w1:t1' },
     { action: 'pane.close', paneId: 'w1:p1' },
+    { action: 'pane.send_input', paneId: 'w1:p1', text: 'npm test' },
   ];
   for (const input of commands) {
     const command = environmentCommand(input);
@@ -144,4 +145,30 @@ it('turns environment control on by default and off only when asked', () => {
   expect(environmentControlEnabled({ enableEnvironmentControl: false })).toBe(false);
   expect(environmentControlEnabled({}, { disable: true })).toBe(false);
   expect(environmentControlEnabled({ enableEnvironmentControl: false }, { enable: true })).toBe(true);
+});
+
+it('types one line into a pane followed by Enter, with no control characters', () => {
+  expect(environmentParams({ action: 'pane.send_input', paneId: 'w1:p1', text: 'git status' })).toEqual({ pane_id: 'w1:p1', text: 'git status', keys: ['Enter'] });
+  expect(() => environmentCommand({ action: 'pane.send_input', paneId: 'w1:p1' })).toThrow();
+  expect(() => environmentCommand({ action: 'pane.send_input', paneId: 'w1:p1', text: 'ls\nrm -rf /' })).toThrow();
+  expect(() => environmentCommand({ action: 'pane.send_input', paneId: 'w1:p1', text: '\u0003' })).toThrow();
+  expect(() => environmentCommand({ action: 'pane.send_input', paneId: 'w1:p1', text: '   ' })).toThrow();
+  expect(() => environmentCommand({ action: 'pane.send_input', paneId: 'w1:p1', text: 'x'.repeat(4097) })).toThrow();
+  expect(() => environmentCommand({ action: 'pane.send_input', paneId: 'w1:p1', text: 'ls', keys: 'C-c' })).toThrow();
+});
+
+it('reads any pane only for the owner with environment control on, and sanitizes the text', async () => {
+  const { core, adapter } = setup();
+  const readPane = vi.fn(async () => ({ text: 'PS> echo hi\nhi\n', truncated: false, observedAt: '2026-11-08T00:00:00.000Z', untrusted: true as const }));
+  Object.assign(adapter, { readPane });
+  try {
+    const result = await core.execute('read_pane', { paneId: 'w1:p3', lines: 20 }, owner);
+    expect(result).toMatchObject({ text: 'PS> echo hi\nhi\n', untrusted: true });
+    expect(readPane).toHaveBeenCalledWith('w1:p3', { lines: 20, bytes: 8192 });
+    await expect(core.execute('read_pane', { paneId: 'w1:p3' }, { ...owner, role: 'guest' })).rejects.toMatchObject({ code: 'forbidden' });
+    await expect(core.execute('read_pane', { paneId: '--current' }, owner)).rejects.toMatchObject({ code: 'invalid_argument' });
+    await expect(core.execute('read_pane', { paneId: 'w1:p3', source: 'ansi' }, owner)).rejects.toMatchObject({ code: 'invalid_argument' });
+  } finally { await core.close(); }
+  const off = setup({ environmentControlEnabled: false });
+  try { await expect(off.core.execute('read_pane', { paneId: 'w1:p3' }, owner)).rejects.toMatchObject({ code: 'write_disabled' }); } finally { await off.core.close(); }
 });

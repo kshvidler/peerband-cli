@@ -319,6 +319,7 @@ cannot use these tools, even on a share that allows messages.
 | `workspace.rename`, `tab.rename`, `pane.rename` | Matching ID and `label` |
 | `workspace.focus`, `tab.focus`, `pane.focus` | Matching ID |
 | `workspace.close`, `tab.close`, `pane.close` | Matching ID. Closes it in Herdr, ending any agent or shell running there |
+| `pane.send_input` | `pane_id`, `text`: one line typed into that pane, followed by Enter. In a shell this runs a command |
 
 `cwd` is an absolute path on the remote machine. Creation preserves the local
 user's focus. Start an agent only in an idle shell pane; Herdr checks whether the
