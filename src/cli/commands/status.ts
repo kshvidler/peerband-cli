@@ -84,7 +84,7 @@ export function colorConnection(s: Style, state: string | null): string {
   if (!state) return s.dim('not running');
   const label = paneLabel({ state: 'running', connectionState: state, activity: [] });
   if (state === 'connected') return s.green(`${symbols.dot} ${label}`);
-  if (state === 'connecting' || state === 'reconnecting') return s.yellow(`${symbols.dot} ${label}`);
+  if (state === 'connecting' || state === 'reconnecting' || state === 'limit-reached') return s.yellow(`${symbols.dot} ${label}`);
   if (state === 'disabled') return s.dim(`${symbols.ring} ${label}`);
   return s.red(`${symbols.dot} ${label}`);
 }

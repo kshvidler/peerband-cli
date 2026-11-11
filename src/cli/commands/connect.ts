@@ -38,6 +38,8 @@ function connectionLine(s: Style, state: ConnectionState, server: string, machin
       return `${s.yellow(symbols.dot)} Herdr is unavailable; requests will fail until it is back`;
     case 'revoked':
       return `${s.red(symbols.dot)} Access was revoked or rejected`;
+    case 'limit-reached':
+      return `${s.yellow(symbols.dot)} Plan limit reached: your other machines use every connection slot. Retrying every minute; turn one off to free a slot (peerband.com/pricing)`;
   }
 }
 

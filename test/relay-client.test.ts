@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 import { ConnectorCore, MockRuntime } from "../src/core/index.js";
 import {
-  redeemEnrollment, runRemoteClient,
+  PLAN_LIMIT_CLOSE_CODE, redeemEnrollment, runRemoteClient,
   loadCredentials,
   saveCredentials,
 } from "../src/core/index.js";
@@ -204,6 +204,56 @@ describe("hosted remote connector", () => {
       expect(upgrades).toBe(2);
       expect(states).toContain("remote-unavailable");
       expect(states).not.toContain("revoked");
+    } finally {
+      abort.abort();
+      await running;
+      await core.close();
+      await new Promise<void>((resolve) => { wss.close(); server.close(() => resolve()); });
+    }
+  });
+
+  it("waits about a minute and retries when the relay refuses it at the plan limit", async () => {
+    const server = createServer();
+    const wss = new WebSocketServer({ noServer: true });
+    let upgrades = 0;
+    server.on("upgrade", (request, socket, head) => {
+      upgrades += 1;
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        if (upgrades === 1) ws.close(PLAN_LIMIT_CLOSE_CODE, "Free plan allows 3 connected machines.");
+        else wss.emit("connection", ws, request);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("No test listener address");
+    const connected = new Promise<void>((resolve) => wss.once("connection", () => resolve()));
+    const abort = new AbortController();
+    const core = new ConnectorCore(new MockRuntime());
+    const states: string[] = [];
+    const messages: string[] = [];
+    let slept = 0;
+    const running = runRemoteClient(
+      core,
+      { serverUrl: `http://127.0.0.1:${address.port}`, installationId: "i", credential: "c" },
+      {
+        signal: abort.signal,
+        random: () => 0,
+        sleep: (ms) => { slept += ms; return new Promise((resolve) => setTimeout(resolve, 1)); },
+        onStatus: (message) => messages.push(message),
+        onConnectionState: (state) => states.push(state),
+      },
+    );
+    try {
+      await Promise.race([
+        connected,
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("connector did not retry after the plan limit")), 3_000)),
+      ]);
+      expect(upgrades).toBe(2);
+      expect(states).toContain("limit-reached");
+      expect(states).not.toContain("revoked");
+      // random() = 0 takes half the 60 s ceiling; a normal first retry waits 250 ms.
+      expect(slept).toBe(30_000);
+      expect(messages.some((m) => m.includes("Free plan allows 3 connected machines."))).toBe(true);
     } finally {
       abort.abort();
       await running;
