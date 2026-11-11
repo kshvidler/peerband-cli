@@ -1,5 +1,5 @@
 // Small, side-effect-free protocol boundary shared by the supervisor and pane.
-const CONNECTION_STATES = new Set(["connecting", "connected", "reconnecting", "revoked", "unavailable", "remote-unavailable", "helper-unavailable", "disabled"]);
+const CONNECTION_STATES = new Set(["connecting", "connected", "reconnecting", "revoked", "unavailable", "remote-unavailable", "helper-unavailable", "disabled", "limit-reached"]);
 const OUTCOMES = new Set(["success", "runtime-unavailable", "error", "uncertain", "timeout"]);
 const TOOLS = new Set(["list_agents", "get_agent_status", "get_agent_output", "get_request_status", "send_agent_message"]);
 
@@ -39,6 +39,7 @@ export function paneLabel(snapshot) {
     case "connecting": return "Connecting";
     case "reconnecting": return "Reconnecting";
     case "revoked": return "Access revoked";
+    case "limit-reached": return "Plan limit reached";
     case "remote-unavailable": return "PeerBand unavailable";
     case "helper-unavailable": return "Helper unavailable";
     case "unavailable": return "Herdr unavailable";

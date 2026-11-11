@@ -27,6 +27,7 @@ it("shows distinct connection failures and caps the visible snapshot", () => {
   expect(paneLabel({ state: "running", connectionState: "connecting" })).toBe("Connecting");
   expect(paneLabel({ state: "running", connectionState: "reconnecting" })).toBe("Reconnecting");
   expect(paneLabel({ state: "stopping", connectionState: "revoked" })).toBe("Access revoked");
+  expect(paneLabel({ state: "running", connectionState: "limit-reached" })).toBe("Plan limit reached");
   expect(paneLabel({ state: "running", connectionState: "unavailable" })).toBe("Herdr unavailable");
   expect(paneLabel({ state: "running", connectionState: "remote-unavailable" })).toBe("PeerBand unavailable");
   expect(paneLabel({ state: "stopping", connectionState: "helper-unavailable" })).toBe("Helper unavailable");

@@ -110,9 +110,13 @@ export async function redeemEnrollment(
   };
 }
 
+/** The relay refuses a connection over the account's connected-machine limit. */
+export const PLAN_LIMIT_CLOSE_CODE = 4409;
+const PLAN_LIMIT_RETRY_MS = 60_000;
+
 export type RemoteOptions = {
   onStatus?: (message: string) => void;
-  onConnectionState?: (state: "connecting" | "connected" | "reconnecting" | "revoked" | "unavailable" | "remote-unavailable") => void;
+  onConnectionState?: (state: "connecting" | "connected" | "reconnecting" | "revoked" | "unavailable" | "remote-unavailable" | "limit-reached") => void;
   onActivity?: (activity: { requestId: string; tool: string; target?: string; outcome: string; latencyMs: number }) => void;
   random?: () => number;
   sleep?: (ms: number) => Promise<void>;
@@ -152,9 +156,11 @@ export async function runRemoteClient(
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
   let attempt = 0;
+  let limitReached = false;
   try {
     while (!stopped) {
       try {
+        limitReached = false;
         setConnectionState("connecting");
         await new Promise<void>((resolve, reject) => {
           const socket = new WebSocket(serverUrl, {
@@ -388,7 +394,9 @@ export async function runRemoteClient(
             options.events?.detach();
             if (Date.now() - openedAt >= 30_000) attempt = 0;
             if (code === 4001 || code === 4003 || code === 4401) stopped = true;
+            limitReached = code === PLAN_LIMIT_CLOSE_CODE;
             if (stopped) setConnectionState("revoked");
+            else if (limitReached) setConnectionState("limit-reached");
             else setConnectionState("reconnecting");
             failActive(
               code === 1008 || code === 4001
@@ -404,7 +412,9 @@ export async function runRemoteClient(
         status(`remote connection failed: ${(error as Error).message}`);
       }
       if (stopped) break;
-      const ceiling = Math.min(30_000, 500 * 2 ** Math.min(attempt++, 6));
+      // At the plan limit, wait about a minute: a slot frees only when another
+      // machine disconnects, so faster retries would only add load.
+      const ceiling = limitReached ? PLAN_LIMIT_RETRY_MS : Math.min(30_000, 500 * 2 ** Math.min(attempt++, 6));
       let remaining = Math.round(ceiling * (0.5 + random() * 0.5));
       while (!stopped && remaining > 0) {
         const slice = Math.min(remaining, 250);
