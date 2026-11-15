@@ -4,6 +4,8 @@ import { EventEmitter } from "node:events";
 import { normalizePaneEvent, createPaneSnapshot, fallbackPaneSnapshot, paneLabel } from "../herdr/pane-state.mjs";
 // @ts-expect-error -- plain JS plugin module without type declarations
 import { controlBoxRows, renderPane, startPaneInput } from "../herdr/pane-ui.mjs";
+// @ts-expect-error -- plain JS plugin module without type declarations
+import { renderTelegram, telegramQr, TELEGRAM_URL } from "../herdr/telegram.mjs";
 
 it("keeps only bounded allowlisted activity metadata", () => {
   const event = normalizePaneEvent({
@@ -193,4 +195,58 @@ it("disables SGR mouse toggles when the compact text-only layout is shown", () =
   expect(writes).toEqual([]);
   cleanup();
   expect(writes).toEqual([]);
+});
+
+it("shows the version and Telegram entry while running, including compact panes", () => {
+  const snapshot = { state: "running", connectionState: "connected", activity: [] };
+  const full = renderPane({ snapshot, version: "0.2.8", columns: 60, rows: 22 });
+  expect(full).toContain("PeerBand v0.2.8");
+  expect(full).toContain("t  Connect Telegram");
+  const compact = renderPane({ snapshot, version: "0.2.8", columns: 40, rows: 8 });
+  expect(compact).toContain("v0.2.8");
+  expect(compact).toContain("t  Telegram");
+});
+
+it("shows the complete QR or a link fallback, with a back control", () => {
+  const qr = telegramQr();
+  const full = renderTelegram({ version: "0.2.8", columns: 60, rows: 24 });
+  expect(full).toContain(qr.join("\n"));
+  expect(full).toContain(TELEGRAM_URL);
+  expect(full).toContain("back to relay");
+  expect(full).toContain("v0.2.8");
+  expect(full).not.toContain("?start=");
+  for (const [columns, rows] of [[40, 22], [30, 20], [60, 8]]) {
+    const view = renderTelegram({ columns, rows });
+    const lines = view.split("\n");
+    expect(lines.length).toBeLessThanOrEqual(rows!);
+    expect(lines.every((line: string) => Array.from(line).length <= columns!)).toBe(true);
+    expect(view).toContain(TELEGRAM_URL);
+    expect(view.includes(qr.join("\n")) || view.includes("Enlarge pane")).toBe(true);
+  }
+});
+
+it("returns from Telegram without toggling or closing the relay and ignores its mouse box", () => {
+  const input = new EventEmitter() as EventEmitter & { isTTY: boolean; setRawMode(value: boolean): void };
+  input.isTTY = true;
+  input.setRawMode = () => {};
+  let telegram = false;
+  let toggles = 0;
+  let closes = 0;
+  const cleanup = startPaneInput({ input, output: { columns: 60, rows: 24, write: () => true },
+    isTelegram: () => telegram, onTelegram: () => { telegram = true; }, onBack: () => { telegram = false; },
+    onToggle: () => { toggles++; }, onClose: () => { closes++; },
+  });
+  for (const back of ["escape", "t", "return", "q"]) {
+    input.emit("keypress", "t", { name: "t" });
+    expect(telegram).toBe(true);
+    input.emit("keypress", " ", { name: "space" });
+    input.emit("data", Buffer.from("\x1b[<0;12;8M"));
+    input.emit("keypress", "", { name: back });
+    expect(telegram).toBe(false);
+  }
+  expect(toggles).toBe(0);
+  expect(closes).toBe(0);
+  input.emit("keypress", " ", { name: "space" });
+  expect(toggles).toBe(1);
+  cleanup();
 });
