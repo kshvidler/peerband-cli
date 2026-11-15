@@ -18,7 +18,7 @@ export const messagesLine = (messages) => messages === "read-only"
 // 1-based screen rows of the on/off box; the Account row is only shown when the server returned an email.
 export const controlBoxRows = (email) => (email ? [7, 9] : [6, 8]);
 
-export function renderPane({ snapshot, identity, email, messages, error, columns = Infinity, rows: height = Infinity }) {
+export function renderPane({ snapshot, identity, email, messages, error, version = "", columns = Infinity, rows: height = Infinity }) {
   const label = paneLabel(snapshot);
   const enabled = snapshot?.state === "running";
   const width = Number.isFinite(columns) ? Math.max(1, Math.floor(columns)) : Infinity;
@@ -26,9 +26,9 @@ export function renderPane({ snapshot, identity, email, messages, error, columns
   const clipLine = (line) => Number.isFinite(width) ? Array.from(line).slice(0, width).join("") : line;
   if (heightLimit < 13) {
     const compactRows = [
-      `RELAY ${enabled ? "ON" : "OFF"} · ${safeText(label, 20)}`,
+      `RELAY ${enabled ? "ON" : "OFF"}${version ? ` v${safeText(version, 20)}` : ""} · ${safeText(label, 20)}`,
       email ? `Account ${safeText(email)}` : `Machine ${safeText(identity || "Unavailable")}`,
-      "Space / Enter  toggle",
+      enabled ? "Space / Enter  toggle   t  Telegram" : "Space / Enter  toggle",
       "q / Esc  close relay",
       "Close disconnects; reopen: peerband relay",
       ...(messages ? [`Messages ${messages === "read-only" ? "read-only" : "allowed"}`] : []),
@@ -39,7 +39,7 @@ export function renderPane({ snapshot, identity, email, messages, error, columns
   const innerWidth = Math.max(0, boxWidth - 2);
   const boxLine = (content) => `│${safeText(content).padEnd(innerWidth).slice(0, innerWidth)}│`;
   const fixedRows = [
-    "PeerBand · Herdr control",
+    `PeerBand${version ? ` v${safeText(version, 20)}` : ""} · Herdr control`,
     "─".repeat(Number.isFinite(width) ? Math.max(0, Math.min(40, width)) : 40),
     `Machine   ${safeText(identity || "Unavailable")}`,
     ...(email ? [`Account   ${safeText(email)}`] : []),
@@ -51,7 +51,7 @@ export function renderPane({ snapshot, identity, email, messages, error, columns
       : `  [Space / Enter]  ${enabled ? "Turn off" : "Turn on"}`),
     `└${"─".repeat(innerWidth)}┘`,
     safeText(messagesLine(messages)),
-    "Recent activity  ·  metadata only",
+    enabled ? "t  Connect Telegram · Recent activity" : "Recent activity  ·  metadata only",
   ];
   const activities = (snapshot?.activity ?? []).slice(-8).reverse().map((item) =>
     `${timeLabel(item.at)}  ${safeText(item.tool, 40)}  ${safeText(item.target || "—", 28)}  ${safeText(item.outcome, 32)}  ${item.latencyMs} ms  ${safeText(item.requestId, 12)}`);
@@ -71,7 +71,7 @@ export function renderPane({ snapshot, identity, email, messages, error, columns
   return body.map(clipLine).join("\n");
 }
 
-export function startPaneInput({ onToggle, onClose, input = stdin, output = stdout, boxRows = [7, 9] }) {
+export function startPaneInput({ onToggle, onClose, onTelegram = () => {}, onBack = () => {}, isTelegram = () => false, input = stdin, output = stdout, boxRows = [7, 9] }) {
   if (!input.isTTY || !input.setRawMode) return () => {};
   const wasRaw = input.isRaw;
   const mouseEnabled = !Number.isFinite(output.rows) || output.rows >= 13;
@@ -80,10 +80,17 @@ export function startPaneInput({ onToggle, onClose, input = stdin, output = stdo
   if (mouseEnabled) output.write("\x1b[?1000h\x1b[?1006h");
   let mouseBuffer = "";
   const keypress = (_text, key = {}) => {
+    if (isTelegram()) {
+      if (key.ctrl && key.name === "c") onClose();
+      else if (["escape", "t", "return", "q"].includes(key.name)) onBack();
+      return;
+    }
+    if (key.name === "t") { onTelegram(); return; }
     if (key.name === "space" || key.name === "return") onToggle();
     else if (key.name === "q" || key.name === "escape" || (key.ctrl && key.name === "c")) onClose();
   };
   const data = (chunk) => {
+    if (isTelegram()) { mouseBuffer = ""; return; }
     mouseBuffer = (mouseBuffer + chunk.toString("utf8")).slice(-256);
     const match = /\x1b\[<0;(\d+);(\d+)M/.exec(mouseBuffer);
     const column = Number(match?.[1]);

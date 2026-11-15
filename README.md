@@ -213,7 +213,11 @@ Failed deliveries are retried for about a day with backoff, and the dashboard sh
 
 ### Telegram
 
-Connect Telegram in the PeerBand dashboard under Channels: scan the QR code, or send `/start` to [@PeerBandBot](https://t.me/PeerBandBot). From then on, agent notes reach your Telegram by default, with alerts when an agent is blocked or a machine goes offline (you choose which in the dashboard). Pick an agent in the chat and your messages go straight to it. Agents can address Telegram directly:
+Run `peerband telegram` to show a scannable terminal QR code and the [@PeerBandBot link](https://t.me/PeerBandBot). In the Relay pane, press **t** (Connect Telegram) while the relay is on; **Esc**, **t** or **Enter** returns to the relay without disconnecting it. The pane also shows the installed PeerBand version. Enlarge a small pane to see the full QR, or open the link.
+
+Open the bot, press **Start**, then its **Connect** button. Sign in to PeerBand and approve the connection. You can also use the [dashboard Channels tab](https://peerband.com/dashboard#channels). The CLI only shows a public bot link, never a link code or credential, and works before login. If logged in and the server supports channels, it also reports whether Telegram is connected; otherwise it reports that status is unavailable.
+
+From then on, agent notes reach your Telegram by default, with alerts when an agent is blocked or a machine goes offline (you choose which in the dashboard). Pick an agent in the chat and your messages go straight to it. Agents can address Telegram directly:
 
 ```sh
 peerband notify --channel telegram "Tests pass; ready to merge?"

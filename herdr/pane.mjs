@@ -8,9 +8,11 @@ import { renderPane, startPaneInput, controlBoxRows } from "./pane-ui.mjs";
 import { connectControl } from "./control.mjs";
 import { syncRelayTab, closeRelayTab } from "./relay-tab.mjs";
 import { credentialsPath, connectorConfigPath } from "./paths.mjs";
+import { renderTelegram } from "./telegram.mjs";
 
 const exec = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url));
+const version = await readFile(join(here, "..", "package.json"), "utf8").then(JSON.parse).then((pkg) => /^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(pkg.version) ? pkg.version : "").catch(() => "");
 const lifecycle = join(here, "lifecycle.mjs");
 const credentials = await readFile(credentialsPath(), "utf8").then(JSON.parse).catch(() => ({}));
 const identity = typeof credentials.machineName === "string" && credentials.machineName
@@ -25,6 +27,7 @@ const connectorConfig = await readFile(connectorConfigPath(), "utf8").then(JSON.
 const messages = connectorConfig && connectorConfig.enableWrites === false ? "read-only" : "allowed";
 
 let closing = false;
+let telegram = false;
 let pending = false;
 let refreshGeneration = 0;
 let refreshInFlight = false;
@@ -47,7 +50,8 @@ const UNAVAILABLE = "Relay helper is not running. Press Space to start it, or ru
 
 function draw() {
   if (closing || !stdout.isTTY) return;
-  stdout.write("\x1b[2J\x1b[H" + renderPane({ snapshot, identity, email, messages, error: errorText, columns: stdout.columns, rows: stdout.rows }));
+  const viewport = { version, columns: stdout.columns, rows: stdout.rows };
+  stdout.write("\x1b[2J\x1b[H" + (telegram ? renderTelegram(viewport) : renderPane({ snapshot, identity, email, messages, error: errorText, ...viewport })));
 }
 async function runLifecycle(command) {
   // start-ui starts Node twice (lifecycle, then the helper); on a loaded machine that alone can take 10+ seconds.
@@ -138,12 +142,20 @@ async function close() {
 }
 const onInputEnd = () => { void close(); };
 const onSignal = () => { void close(); };
-const stopInput = startPaneInput({ boxRows: controlBoxRows(email), onToggle: toggle, onClose: () => {
-  if (closeArmed) { void close(); return; }
-  closeArmed = true;
-  errorText = "Closing disconnects the relay. Press q again to close; reopen with `peerband relay`.";
-  draw();
-} });
+const stopInput = startPaneInput({
+  boxRows: controlBoxRows(email),
+  onToggle: toggle,
+  isTelegram: () => telegram,
+  onTelegram: () => { if (snapshot?.state === "running") { telegram = true; closeArmed = false; draw(); } },
+  onBack: () => { telegram = false; draw(); },
+  onClose: () => {
+    telegram = false;
+    if (closeArmed) { void close(); return; }
+    closeArmed = true;
+    errorText = "Closing disconnects the relay. Press q again to close; reopen with `peerband relay`.";
+    draw();
+  },
+});
 
 function wireControl(socket) {
   let resolveClosed;
@@ -229,7 +241,7 @@ if (stdinIsInteractive()) {
   process.once("SIGHUP", onSignal);
 }
 if (!stdinIsInteractive()) {
-  console.log(renderPane({ snapshot, identity, email, messages, error: "Interactive terminal controls are required in this pane." }));
+  console.log(renderPane({ snapshot, identity, email, messages, version, error: "Interactive terminal controls are required in this pane." }));
 } else {
   try {
     errorText = "Starting the PeerBand relay…";
