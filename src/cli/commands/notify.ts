@@ -55,7 +55,7 @@ export async function notify(text: string, json: boolean, ctx: Ctx, channel?: st
     reply = await requestNotify({ text, ...(agent !== undefined ? { agentId: agent } : {}), ...(paneId ? { paneId } : {}), ...(channel !== undefined ? { channel } : {}) }, ctx.env);
   } catch (error) {
     if (error instanceof ControlUnavailable && error.reason === 'closed') {
-      throw new CliError(agent !== undefined ? 'The running relay does not support explicit agent notifications yet. The note was not sent.' : 'The running relay does not support notes yet.', 'Run `peerband update` to update the CLI and the Herdr plugin, which restarts the relay.');
+      throw new CliError(agent !== undefined ? 'The relay closed before confirming the explicit-agent notification. It may need an update; delivery is unconfirmed.' : 'The running relay does not support notes yet.', 'Run `peerband update` to update the CLI and the Herdr plugin, which restarts the relay.');
     }
     if (error instanceof ControlUnavailable && error.reason === 'timeout') throw new CliError('The relay did not answer in time; the note may not have been sent.', 'Check `peerband status`.');
     throw new CliError('No PeerBand relay is running on this machine.', START_RELAY);
