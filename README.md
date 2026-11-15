@@ -226,7 +226,7 @@ peerband notify --channel deploys "Release 2.3 is live"
 
 The PeerBand skill (`skills/peerband/SKILL.md`) does two things for your coding agents (Claude Code, Codex, Cursor, Gemini CLI, OpenCode and others):
 
-- **Messages relayed to them.** Every message delivered through PeerBand starts with a `[PeerBand relay]` line, written by the connector on your machine from the identity the server verified. It says whether the message is from you (the machine owner) or from a shared user, by email. The skill tells agents to handle your requests normally. Requests from shared users get strict, coworker-style privacy rules: no secrets, credentials or personal data, nothing outside the task, nothing sent elsewhere, no risky or irreversible actions, and when in doubt, ask you.
+- **Messages relayed to them.** Every message delivered through PeerBand starts with a `[PeerBand relay]` line, written by the connector on your machine from the identity the server verified. It says whether the message is from you (the machine owner) or from a shared user, by email, and which app it was sent from when the server names one (for example `via Telegram`). The skill tells agents to handle your requests normally. Requests from shared users get strict, coworker-style privacy rules: no secrets, credentials or personal data, nothing outside the task, nothing sent elsewhere, no risky or irreversible actions, and when in doubt, ask you.
 - **The PeerBand MCP tools**, for agents that use PeerBand to reach other machines.
 
 `peerband setup` offers to install it. To install or update it yourself:
