@@ -53,6 +53,7 @@ export function rootHelp(s: Style, version: string): string {
     ...section(s, 'From an agent', [
       'peerband notify "<text>"   Send the machine owner a short note (task done, blocked, result)',
       '  --channel NAME           Send it to one of the owner\'s channels instead (see peerband channels)',
+      '  --agent ID               Attribute a reply to this exact current agent',
     ]),
     ...section(s, 'Exit codes', ['0 ok   1 failure   2 usage error   3 not logged in   130 interrupted']),
     '',

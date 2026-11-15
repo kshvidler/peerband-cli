@@ -188,11 +188,13 @@ export class ConnectorEvents implements RelayEventChannel {
   }
 
   /** Sends an owner-directed note. Resolves the calling pane to an agent id when the runtime can. */
-  async notify(input: { text: unknown; paneId?: unknown; channel?: unknown }): Promise<NotifyResult> {
+  async notify(input: { text: unknown; paneId?: unknown; agentId?: unknown; channel?: unknown }): Promise<NotifyResult> {
     if (!this.adapter.getCapabilities().readOutput) throw new ConnectError('unsupported_capability', 'This connector does not share agent output, so notes are turned off.', 'Use a runtime with output support.');
     const text = cleanNote(input.text);
     const channel = noteChannel(input.channel);
-    const agentId = await this.resolveAgent(input.paneId);
+    const agentId = input.agentId !== undefined
+      ? await this.explicitAgent(input.agentId)
+      : await this.resolveAgent(input.paneId);
     // The channel is echoed back so `peerband notify --channel` can tell this relay from one that ignores it.
     const echo = channel ? { channel } : {};
     if (!this.send) return { sent: false, agentId, ...echo };
@@ -202,6 +204,17 @@ export class ConnectorEvents implements RelayEventChannel {
     const frame = eventFrame('agent.notified', { agentId, text, audience: 'owner', ...echo });
     const sent = this.send(frame);
     return { sent, agentId, ...(sent ? { eventId: frame.eventId } : {}), ...echo };
+  }
+
+  private async explicitAgent(value: unknown): Promise<string> {
+    if (typeof value !== 'string' || value.length < 1 || value.length > 256 || /[\x00-\x1f\x7f]/.test(value)) {
+      throw new ConnectError('invalid_argument', 'Invalid agent id.', 'Use the exact agent id in the relayed reply instructions.');
+    }
+    const agent = await this.adapter.getAgent(value);
+    if (agent.id !== value || !this.visible(agent.id, agent.workspace)) {
+      throw new ConnectError('forbidden', 'This agent is outside the configured allowlist.', 'Choose an allowed agent.');
+    }
+    return agent.id;
   }
 
   private async resolveAgent(paneId: unknown): Promise<string | null> {

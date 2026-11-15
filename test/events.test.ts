@@ -175,6 +175,32 @@ describe('notes', () => {
     expect(sent).toHaveLength(3);
   });
 
+  it('uses an explicit current agent instead of a missing or stale pane', async () => {
+    const { events, adapter, sent, send } = harness();
+    const agents = await adapter.listAgents();
+    events.attach(send);
+    const result = await events.notify({ text: 'Reply', paneId: 'missing:pane', agentId: agents[1]!.id, channel: 'telegram' });
+    expect(result).toMatchObject({ sent: true, agentId: agents[1]!.id, channel: 'telegram' });
+    expect(sent.at(-1)!.data).toEqual({ agentId: agents[1]!.id, text: 'Reply', audience: 'owner', channel: 'telegram' });
+    expect((await relaySchema())(sent.at(-1))).toBe(true);
+    const before = sent.length;
+    await expect(events.notify({ text: 'No fallback', agentId: 'stale-id', channel: 'telegram' })).rejects.toMatchObject({ code: 'agent_not_found' });
+    await expect(events.notify({ text: 'No fallback', agentId: null, channel: 'telegram' })).rejects.toMatchObject({ code: 'invalid_argument' });
+    expect(sent).toHaveLength(before);
+  });
+
+  it('rejects explicit agents outside agent and workspace allowlists without emitting a note', async () => {
+    const adapter = new MockRuntime();
+    const agents = await adapter.listAgents();
+    for (const options of [{ allowedAgents: [agents[0]!.id] }, { allowedWorkspaces: ['not-this-workspace'] }]) {
+      const { events, sent, send } = harness(options, adapter);
+      events.attach(send);
+      const before = sent.length;
+      await expect(events.notify({ text: 'Private', agentId: agents[1]!.id, channel: 'telegram' })).rejects.toMatchObject({ code: 'forbidden' });
+      expect(sent).toHaveLength(before);
+    }
+  });
+
   it('hides agents outside the allow-list and limits the note rate', async () => {
     const adapter = new MockRuntime();
     const agents = await adapter.listAgents();
