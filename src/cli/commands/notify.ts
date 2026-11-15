@@ -3,7 +3,7 @@ import { flag, str } from '../args.js';
 import { ControlUnavailable, requestNotify } from '../control.js';
 import { sanitize, symbols } from '../output.js';
 import { CliError, type CommandSpec, type Ctx, UsageError } from '../types.js';
-import { dashboardUrl, fetchChannels, stateLabel } from './channels.js';
+import { dashboardUrl, fetchChannels, stateLabel, TELEGRAM_CHANNEL } from './channels.js';
 import { requireCredentials } from './shared.js';
 
 const PANE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
@@ -20,19 +20,25 @@ async function checkChannel(name: string, ctx: Ctx): Promise<void> {
   const credentials = await requireCredentials(ctx);
   const channels = await fetchChannels(ctx, credentials);
   const channel = channels.find((candidate) => candidate.name === name);
+  if (!channel && name === TELEGRAM_CHANNEL) {
+    throw new CliError(
+      'The machine owner has not connected Telegram to PeerBand, so there is no "telegram" channel. The note was not sent.',
+      `The owner connects Telegram in the dashboard (${dashboardUrl(credentials)} → Channels). Until then, send the note without --channel.`,
+    );
+  }
   if (!channel) {
     const names = channels.map((candidate) => candidate.name);
     throw new CliError(
       `There is no channel named "${name}" for this machine. The note was not sent.`,
       names.length
         ? `Available channels: ${names.join(', ')}. See \`peerband channels\`.`
-        : `This machine has no channels yet. The owner can add one in the dashboard (${dashboardUrl(credentials)} → Webhooks).`,
+        : `This machine has no channels yet. The owner can add one in the dashboard (${dashboardUrl(credentials)} → Channels).`,
     );
   }
   if (channel.state !== 'active') {
     throw new CliError(
       `The channel "${name}" is ${stateLabel(channel.state)}, so it does not accept notes. The note was not sent.`,
-      `The owner can fix it in the dashboard (${dashboardUrl(credentials)} → Webhooks), or send the note without --channel.`,
+      `The owner can fix it in the dashboard (${dashboardUrl(credentials)} → Channels), or send the note without --channel.`,
     );
   }
 }
@@ -86,15 +92,16 @@ export const spec: CommandSpec = {
   summary: 'Send a short note from an agent to the machine owner',
   usage: 'peerband notify "<text>" [--channel NAME] [--json]',
   description:
-    "Sends a short note (1 to 1024 characters) through the running relay to the owner of this machine, for example when a long task finished or an agent is blocked on a decision. Run it from inside a Herdr pane and the note names the agent in that pane. The note goes to the owner only, never to people this machine is shared with. Control characters are removed and likely secrets are redacted (best effort), but do not put credentials or personal data in notes.\n\nWithout --channel the note goes to the PeerBand dashboard and to every owner webhook that takes notes. With --channel NAME it still appears in the dashboard (marked with the channel name), but of the owner's webhooks only that one channel receives it (a webhook such as a Slack channel; see `peerband channels`). The channel is checked first: an unknown or inactive channel is an error and nothing is sent.",
+    "Sends a short note (1 to 1024 characters) through the running relay to the owner of this machine, for example when a long task finished or an agent is blocked on a decision. Run it from inside a Herdr pane and the note names the agent in that pane. The note goes to the owner only, never to people this machine is shared with. Control characters are removed and likely secrets are redacted (best effort), but do not put credentials or personal data in notes.\n\nWithout --channel the note goes to the PeerBand dashboard, to every owner webhook that takes notes and, once the owner has connected Telegram, to their Telegram chat with the PeerBand bot (unless they turned notes off there). With --channel NAME it still appears in the dashboard (marked with the channel name), but only that one channel receives it: `telegram` for the owner's Telegram (even with notes turned off there), or a webhook such as a Slack channel; see `peerband channels`. The channel is checked first: an unknown or inactive channel is an error and nothing is sent.",
   options: [
-    { name: 'channel', type: 'string', valueName: 'NAME', description: 'Deliver the note to this channel instead of every webhook that takes notes; it still shows in the dashboard (see `peerband channels`).' },
+    { name: 'channel', type: 'string', valueName: 'NAME', description: 'Deliver the note to this one channel (`telegram`, or a webhook name) instead of everywhere notes go; it still shows in the dashboard (see `peerband channels`).' },
     { name: 'json', type: 'boolean', description: 'Print a machine-readable result: {sent, agentId, eventId}, plus channel with --channel.' },
   ],
   positionals: { name: 'text', max: 64 },
   examples: [
     ['peerband notify "Migration finished, 3 tests failing"', 'Report a result when a long task ends'],
     ['peerband notify "Blocked: should I drop the legacy table?"', 'Ask the owner for a decision'],
+    ['peerband notify --channel telegram "Tests pass; ready to merge?"', "Send to the owner's Telegram"],
     ['peerband notify --channel deploys "Release 2.3 is live"', 'Send to one channel (an owner webhook)'],
     ['peerband notify --json "Build green"', 'For scripts: prints the event id'],
   ],
