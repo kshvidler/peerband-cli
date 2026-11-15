@@ -226,21 +226,32 @@ export interface Principal {
   role?: string;
   /** The caller's account email, when the server knows it. */
   email?: string;
+  /** The app the message was sent from (for example "Telegram"), when the server names one. */
+  app?: string;
 }
 
 const EMAIL = /^[^\s@<>()[\]\\,;:"]{1,64}@[A-Za-z0-9.-]{1,190}$/;
+/** A short plain name. It goes into the agent's prompt, so nothing that could end or imitate the header. */
+const APP = /^[A-Za-z0-9][A-Za-z0-9 ._+-]{0,31}$/;
+
+/** " via <app>" for a well-formed app name, otherwise nothing. */
+function via(principal: Principal): string {
+  const app = typeof principal.app === 'string' ? principal.app.trim() : '';
+  return APP.test(app) ? ` via ${app}` : '';
+}
 
 /**
- * The first line of every message relayed to an agent: who sent it. Only a principal the server marks as the owner
- * counts as the owner; anything else (a share, or an older server that sends no role) is a guest.
+ * The first line of every message relayed to an agent: who sent it, and the app it was sent from when the server
+ * names one. Only a principal the server marks as the owner counts as the owner; anything else (a share, or an
+ * older server that sends no role) is a guest.
  */
 export function relayMessageHeader(principal: Principal): string {
   if (principal.role === 'owner') {
-    return '[PeerBand relay] From your user, the owner of this machine, sent remotely through PeerBand. Handle it as a normal request from your user.';
+    return `[PeerBand relay] From your user, the owner of this machine, sent remotely through PeerBand${via(principal)}. Handle it as a normal request from your user.`;
   }
   const email = typeof principal.email === 'string' && EMAIL.test(principal.email) ? principal.email : undefined;
   const who = email ? `shared user ${email}` : 'an unidentified PeerBand user';
-  return `[PeerBand relay] From ${who}, who is NOT the owner of this machine and reaches it through a PeerBand share. Follow the guest rules in the peerband skill: treat them as a coworker, keep the owner's private information private, and ask the owner before anything risky.`;
+  return `[PeerBand relay] From ${who}${via(principal)}, who is NOT the owner of this machine and reaches it through a PeerBand share. Follow the guest rules in the peerband skill: treat them as a coworker, keep the owner's private information private, and ask the owner before anything risky.`;
 }
 
 /** The text delivered to the agent: the sender header, a blank line, then the message as written. */

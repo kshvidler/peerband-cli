@@ -116,7 +116,8 @@
             "id": { "type": "string" },
             "scopes": { "type": "array", "items": { "type": "string" } },
             "role": { "enum": ["owner", "guest"], "description": "owner: the caller owns this machine; guest: the caller reaches it through a share. The client treats a missing or unknown role as guest when it labels delivered messages." },
-            "email": { "type": "string", "description": "The caller's account email, when the server knows it. Omitted otherwise." }
+            "email": { "type": "string", "description": "The caller's account email, when the server knows it. Omitted otherwise." },
+            "app": { "type": "string", "description": "The app the request was sent from, for example Telegram, when the server names one. Omitted otherwise. The client shows a short plain name as 'via <app>' in the header of delivered messages and ignores anything else." }
           }
         }
       },
