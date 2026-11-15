@@ -255,7 +255,12 @@ export function relayMessageHeader(principal: Principal): string {
 }
 
 /** The text delivered to the agent: the sender header, a blank line, then the message as written. */
-export const labelRelayedMessage = (message: string, principal: Principal): string => `${relayMessageHeader(principal)}\n\n${message}`;
+export const labelRelayedMessage = (message: string, principal: Principal, agentId?: string): string => {
+  const reply = principal.role === 'owner' && principal.app === 'Telegram'
+    ? `\nReply to the user with peerband notify --channel telegram${agentId && /^[A-Za-z0-9._:-]{1,256}$/.test(agentId) ? ` --agent ${agentId}` : ''} "<your reply>". This sends to Telegram and the dashboard only. If the command is unsupported or fails, report the error; do not fall back to an unscoped notification.`
+    : '';
+  return `${relayMessageHeader(principal)}${reply}\n\n${message}`;
+};
 
 export interface ConnectorCoreOptions {
   writesEnabled?: boolean;
@@ -550,7 +555,7 @@ export class ConnectorCore {
       this.idempotency.delete(requestKeyHash);
       throw new ConnectError('receipt_store_unavailable', 'The request receipt could not be saved; nothing was sent.', 'Check local storage access and retry with the same key.');
     }
-    const job = this.dispatch(receipt, this.labelMessages ? labelRelayedMessage(message, principal) : message).catch(() => undefined);
+    const job = this.dispatch(receipt, this.labelMessages ? labelRelayedMessage(message, principal, agent.id) : message).catch(() => undefined);
     this.inFlight.add(job);
     void job.finally(() => this.inFlight.delete(job));
     return this.publicReceipt(receipt);

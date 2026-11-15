@@ -223,6 +223,8 @@ From then on, agent notes reach your Telegram by default, with alerts when an ag
 peerband notify --channel telegram "Tests pass; ready to merge?"
 ```
 
+Replies to requests marked `via Telegram` should keep that channel. The relayed message supplies the exact agent ID; use `peerband notify --channel telegram --agent ID "<reply>"` to preserve its topic even when a shell or tool process has no usable pane identity. The relay validates that the agent is current and allowed. A stale or disallowed ID is an error; it never falls back to an unattributed note. Explicit-agent replies require an updated CLI and Relay plugin; an older helper refuses the command without sending a note.
+
 A note sent with `--channel telegram` arrives even if you turned notes off for Telegram. Until the owner connects Telegram, `telegram` is not in `peerband channels` and the command fails without sending.
 
 ### Channels

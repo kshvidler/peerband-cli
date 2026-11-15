@@ -90,3 +90,12 @@ describe('relayed message labels', () => {
     expect(await deliver({ id: 'u6', scopes, role: 'guest' }, false)).toBe('Run the tests');
   });
 });
+
+
+it('gives Telegram owners an exact channel and agent reply command, without granting it to guests', async () => {
+  const text = await deliver({ id: 'u', scopes, role: 'owner', app: 'Telegram' }, true);
+  expect(text).toMatch(/peerband notify --channel telegram --agent mock-[A-Za-z0-9._:-]+/);
+  expect(text).toContain('do not fall back to an unscoped notification');
+  expect(await deliver({ id: 'guest', scopes, role: 'guest', app: 'Telegram' }, true)).not.toContain('peerband notify');
+  expect(labelRelayedMessage('hello', { id: 'u', scopes, role: 'owner', app: 'Telegram' }, 'id; bad')).not.toContain('id; bad');
+});

@@ -137,7 +137,7 @@ async function supervise() {
         uiOwned = true;
         if (!child) startChild();
         reply(currentSnapshot());
-      } else if (input.command === "notify") forwardNote(input, reply);
+      } else if (input.command === "notify" || input.command === "notify-agent") forwardNote(input, reply);
       else if (input.command === "status") reply(currentSnapshot(), true);
       else if (input.command === "stop") {
         reply({ state: "stopping" }, true);
@@ -173,6 +173,12 @@ async function supervise() {
     const text = input.text;
     const paneId = input.paneId;
     const channel = input.channel;
+    const explicit = input.command === "notify-agent";
+    const agentId = input.agentId;
+    if (explicit && (typeof agentId !== "string" || agentId.length < 1 || agentId.length > 256)) {
+      reply({ error: "invalid", message: "Invalid agent id." }, true);
+      return;
+    }
     if (typeof text !== "string" || text.length > 4096 || (paneId !== undefined && (typeof paneId !== "string" || paneId.length > 128))) {
       reply({ error: "invalid", message: "The note must be text of at most 1024 characters." }, true);
       return;
@@ -194,7 +200,7 @@ async function supervise() {
     }, 5000);
     timer.unref();
     pendingNotes.set(id, { reply, timer });
-    current.send({ type: "peerband:notify", id, text, ...(paneId ? { paneId } : {}), ...(channel ? { channel } : {}) }, (error) => {
+    current.send({ type: explicit ? "peerband:notify-agent" : "peerband:notify", id, text, ...(explicit ? { agentId } : {}), ...(paneId ? { paneId } : {}), ...(channel ? { channel } : {}) }, (error) => {
       if (!error || !pendingNotes.delete(id)) return;
       clearTimeout(timer);
       reply({ error: "not-running", message: "The connector is not reachable." }, true);

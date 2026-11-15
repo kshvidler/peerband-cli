@@ -273,6 +273,14 @@ describe('peerband notify through the real relay helper', () => {
       expect(addressedReply.channel).toBe('deploys');
       for (let attempt = 0; attempt < 50 && !frames.some((frame) => frame.eventId === addressedReply.eventId); attempt++) await pause(50);
       expect(frames.find((frame) => frame.eventId === addressedReply.eventId)).toMatchObject({ name: 'agent.notified', data: { text: 'Release is live', audience: 'owner', channel: 'deploys' } });
+      const explicit = await runCli(['notify', '--json', '--channel', 'telegram', '--agent', reply.agentId, 'Reply in the same topic'], {
+        env: { PEERBAND_CONFIG_HOME: home, HERDR_PANE_ID: 'wrong:pane' },
+        overrides: { fetch: channelServer({ body: { channels: [{ name: 'telegram', format: 'telegram', state: 'active', events: ['agent.notified'] }] } }).fetch },
+      });
+      expect(explicit.code, explicit.stderr).toBe(0);
+      const exact = JSON.parse(explicit.stdout) as { eventId: string };
+      for (let attempt = 0; attempt < 50 && !frames.some((frame) => frame.eventId === exact.eventId); attempt++) await pause(50);
+      expect(frames.find((frame) => frame.eventId === exact.eventId)).toMatchObject({ name: 'agent.notified', data: { agentId: reply.agentId, channel: 'telegram' } });
       expect(JSON.stringify(frames)).not.toContain('Recent activity is demo data');
     } finally {
       await command('stop').catch(() => undefined);
@@ -283,4 +291,16 @@ describe('peerband notify through the real relay helper', () => {
       await rm(home, { recursive: true, force: true, maxRetries: 20, retryDelay: 200 }).catch(() => undefined);
     }
   }, 60_000);
+});
+
+
+describe('peerband notify --agent compatibility', () => {
+  it('uses a distinct control command so an old helper cannot silently send an unattributed note', async () => {
+    const helper = await fakeHelper((_request, socket) => socket.destroy());
+    try {
+      const result = await runCli(['notify', '--agent', 'herdr-exact', 'Reply'], { env: { PEERBAND_CONFIG_HOME: helper.home } });
+      expect(result.code).not.toBe(0);
+      expect(helper.received).toEqual([{ token: 'secret-token', command: 'notify-agent', agentId: 'herdr-exact', text: 'Reply' }]);
+    } finally { await helper.close(); }
+  });
 });
