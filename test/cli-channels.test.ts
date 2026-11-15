@@ -54,7 +54,7 @@ describe('peerband channels', () => {
     expect(result.code).toBe(0);
     expect(result.stdout).toContain('No channels yet');
     expect(result.stdout).toContain('https://peerband.com/dashboard');
-    expect(result.stdout).toContain('Webhooks');
+    expect(result.stdout).toContain('Channels');
   });
 
   it('reports a server without channel support, a revoked credential, and a missing login', async () => {
@@ -75,6 +75,6 @@ describe('peerband channels', () => {
     expect((await runCli(['--help'])).stdout).toContain('channels');
     const help = await runCli(['channels', '--help']);
     expect(help.stdout).toContain('peerband channels [list] [--json]');
-    expect(help.stdout).toContain('Webhooks');
+    expect(help.stdout).toContain('Channels');
   });
 });

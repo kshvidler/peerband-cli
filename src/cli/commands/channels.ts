@@ -4,12 +4,15 @@ import { sanitize } from '../output.js';
 import { CliError, type CommandSpec, type Ctx, UsageError } from '../types.js';
 import { installationCall, requireCredentials } from './shared.js';
 
-/** One of the owner's webhook endpoints this machine can address by name. The server never sends URLs or secrets here. */
+/** A channel this machine can address by name: one of the owner's webhooks, or the built-in `telegram` channel once the owner connected Telegram. The server never sends URLs or secrets here. */
 export interface Channel { name: string; format: string; state: string; events: string[] }
 
 export const NO_CHANNEL_SUPPORT = "This PeerBand server doesn't support channels yet.";
 
-/** Where the owner adds channels: the Webhooks section of the dashboard on this machine's server. */
+/** The built-in channel for the owner's Telegram chat with the PeerBand bot. */
+export const TELEGRAM_CHANNEL = 'telegram';
+
+/** Where the owner adds channels: the Channels tab of the dashboard on this machine's server. */
 export const dashboardUrl = (credentials: Credentials): string => new URL('/dashboard', enrollmentBase(credentials.serverUrl)).href;
 
 /** The channels this machine can send notes to (GET /api/installation/channels). */
@@ -44,7 +47,7 @@ async function list(ctx: Ctx, json: boolean): Promise<number> {
   const s = ctx.out.stdout;
   if (!channels.length) {
     ctx.out.print('No channels yet for this machine.');
-    ctx.out.print(s.dim(`Add one in the dashboard (${dashboardUrl(credentials)} → Webhooks): its name is the channel name. Agents then send to it with \`peerband notify --channel NAME "<text>"\`.`));
+    ctx.out.print(s.dim(`The owner adds them in the dashboard (${dashboardUrl(credentials)} → Channels): connecting Telegram adds the \`telegram\` channel, and each webhook's name is a channel name. Agents then send to one with \`peerband notify --channel NAME "<text>"\`.`));
     return 0;
   }
   ctx.out.print(s.bold('Channels'));
@@ -54,7 +57,7 @@ async function list(ctx: Ctx, json: boolean): Promise<number> {
     ctx.out.print(`  ${channel.name.padEnd(width)}  ${channel.format.padEnd(8)}  ${state}`);
   }
   ctx.out.print('');
-  ctx.out.print(s.dim('Send a note to one with `peerband notify --channel NAME "<text>"`. Manage channels in the dashboard (Webhooks).'));
+  ctx.out.print(s.dim('Send a note to one with `peerband notify --channel NAME "<text>"`. Manage channels in the dashboard (Channels).'));
   return 0;
 }
 
@@ -63,7 +66,7 @@ export const spec: CommandSpec = {
   summary: 'List the channels agents can send notes to',
   usage: 'peerband channels [list] [--json]',
   description:
-    "Lists the channels this machine can send notes to with `peerband notify --channel NAME`. A channel is one of the machine owner's webhooks (for example a Slack or Discord incoming webhook, or your own endpoint), addressed by its name. The owner adds them in the PeerBand dashboard under Webhooks; only webhooks that include this machine are listed. Shows each channel's name, format and state; only active channels accept notes. Webhook URLs and secrets are never shown.",
+    "Lists the channels this machine can send notes to with `peerband notify --channel NAME`. A channel is either the built-in `telegram` channel, listed once the machine owner has connected Telegram to PeerBand, or one of the owner's webhooks (for example a Slack or Discord incoming webhook, or your own endpoint), addressed by its name. The owner sets them up in the PeerBand dashboard under Channels; only webhooks that include this machine are listed. Shows each channel's name, format and state; only active channels accept notes. Webhook URLs and secrets are never shown.",
   options: [{ name: 'json', type: 'boolean', description: 'Print machine-readable JSON: {channels: [{name, format, state, events}]}.' }],
   positionals: { name: 'list', max: 1 },
   examples: [

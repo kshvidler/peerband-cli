@@ -38,7 +38,7 @@ MCP client --> PeerBand relay <== outbound WebSocket == peerband connector --> H
 - **Check in from anywhere.** Add one URL to ChatGPT, Claude or Claude Code and ask what your agents are doing. Your client lists agents and reads their status and bounded recent output.
 - **Send the next instruction.** Messages go to an explicit agent, only with your consent (`agents:message`), and every message tells the agent who sent it.
 - **Share a machine.** `peerband share` creates an invite link for a teammate or a review bot: read only, or read and message. Your agent treats guests as coworkers.
-- **Get told when an agent needs you.** Agents send you notes with `peerband notify`. Webhooks deliver status changes and notes to Slack, Discord, or your own endpoint, signed with [Standard Webhooks](https://www.standardwebhooks.com). Send a note to one webhook with `--channel`.
+- **Get told when an agent needs you.** Agents send you notes with `peerband notify`. Connect Telegram and notes and alerts arrive there, and you can message your agents back. Webhooks deliver status changes and notes to Slack, Discord, or your own endpoint, signed with [Standard Webhooks](https://www.standardwebhooks.com). Send a note to one channel with `--channel`.
 - **No polling.** The connector streams agent status changes, so the dashboard and MCP clients read output only when something changed. `wait_for_agent` waits for an agent to finish or block without reading its output.
 - **Safe by default.** Outbound connection only, metadata-only activity logs, one switch to make a machine read only, and best-effort secret redaction.
 
@@ -149,7 +149,7 @@ The plugin adds a persistent tab titled `PeerBand Relay [On]` or `[Off]` that sh
 | `peerband relay` | Open or focus the Relay tab in Herdr. If the plugin is missing the wrong version, a local checkout, or points at another config directory, it offers to repair it first |
 | `peerband skill` | Install or update the PeerBand agent skill for every coding agent on this machine (through `npx skills add`, falling back to a copy). Keeps a skill you edited unless `--force`; `--copy` skips npx |
 | `peerband share` | Create a single-use invite link that shares this machine with another PeerBand user (read only; `--message` also allows messages; `--expires DAYS`, default 7). `share list` shows who has access and unused links; `share revoke ID` removes access or cancels a link |
-| `peerband notify "<text>"` | From inside a Herdr pane: send the machine owner a short note (1 to 1024 characters) through the running relay, for example when a long task finished or an agent is blocked on a decision. The note names the agent in that pane. `--channel NAME` sends it to one of your channels instead (see below). `--json` for machine-readable output |
+| `peerband notify "<text>"` | From inside a Herdr pane: send the machine owner a short note (1 to 1024 characters) through the running relay, for example when a long task finished or an agent is blocked on a decision. The note names the agent in that pane. `--channel NAME` sends it to one of your channels instead, such as `telegram` (see below). `--json` for machine-readable output |
 | `peerband channels` | List the channels this machine can send notes to (name, format, state). `--json` for machine-readable output |
 | `peerband herdr install` | Install (or update) the Herdr plugin. Stops the relay and closes its tab first, puts the previous plugin back if the new one fails, and reopens the tab afterwards |
 | `peerband herdr uninstall` | Stop the relay, close its tab, remove the plugin and its `settings.json`, and delete the local relay state and stale locks (your login is kept) |
@@ -203,7 +203,7 @@ The note goes to the machine owner only (never to people you shared the machine 
 
 ### Webhooks
 
-Add webhooks in the PeerBand dashboard under Webhooks. Each one has a name, an HTTPS URL, a format and a filter:
+Add webhooks in the PeerBand dashboard under Channels. Each one has a name, an HTTPS URL, a format and a filter:
 
 - **Formats.** `slack` and `discord` post a one-line message to an incoming webhook. `standard` posts a JSON envelope signed with [Standard Webhooks](https://www.standardwebhooks.com) (`webhook-id`, `webhook-timestamp`, `webhook-signature` headers), so you can verify it with any Standard Webhooks library and the secret shown once when you create the webhook.
 - **Events.** `agent.status_changed` (filter by status, for example only `blocked`), `agent.notified` (notes), `machine.online` and `machine.offline` (held for 30 seconds, so a short network drop pages nobody). The Test button sends `webhook.test`. Webhooks go to the machine owner only, never to people you shared the machine with.
@@ -211,13 +211,24 @@ Add webhooks in the PeerBand dashboard under Webhooks. Each one has a name, an H
 
 Failed deliveries are retried for about a day with backoff, and the dashboard shows every attempt. Webhook payloads carry metadata and note text only, never terminal output.
 
+### Telegram
+
+Connect Telegram in the PeerBand dashboard under Channels: scan the QR code, or send `/start` to [@PeerBandBot](https://t.me/PeerBandBot). From then on, agent notes reach your Telegram by default, with alerts when an agent is blocked or a machine goes offline (you choose which in the dashboard). Pick an agent in the chat and your messages go straight to it. Agents can address Telegram directly:
+
+```sh
+peerband notify --channel telegram "Tests pass; ready to merge?"
+```
+
+A note sent with `--channel telegram` arrives even if you turned notes off for Telegram. Until the owner connects Telegram, `telegram` is not in `peerband channels` and the command fails without sending.
+
 ### Channels
 
-A channel is one of your PeerBand webhooks, addressed by its name: for example a Slack or Discord incoming webhook, or your own endpoint. Add them in the PeerBand dashboard under Webhooks; the webhook's name is the channel name. A note always shows in the dashboard. Without a channel, it also goes to every webhook that takes notes; with one, it goes to that one webhook instead (the dashboard shows which channel it was sent to):
+A channel is a named place notes can go: the built-in `telegram` channel, or one of your PeerBand webhooks (for example a Slack or Discord incoming webhook, or your own endpoint). Set them up in the PeerBand dashboard under Channels; a webhook's name is its channel name. A note always shows in the dashboard. Without a channel, it also goes to every webhook that takes notes and to Telegram; with one, it goes to that one channel instead (the dashboard shows which channel it was sent to):
 
 ```sh
 peerband channels                                        # channels this machine can use: name, format, state
 peerband notify --channel deploys "Release 2.3 is live"
+peerband notify --channel telegram "Tests pass; ready to merge?"
 ```
 
 `peerband notify --channel` first checks with PeerBand that the channel exists for this machine and is active, so a typo or a paused webhook is an error and nothing is sent. `peerband channels` never shows webhook URLs or secrets. Channels need a PeerBand server and a relay that support them: an older server answers "doesn't support channels yet", and an older relay is reported with a hint to run `peerband update`.

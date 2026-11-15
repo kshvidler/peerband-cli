@@ -148,6 +148,26 @@ describe('peerband notify --channel', () => {
     }
   });
 
+  it('sends to the built-in telegram channel once the owner connected Telegram, and explains when not', async () => {
+    const helper = await fakeHelper((request, socket) => socket.end(`${JSON.stringify({ ok: true, sent: true, agentId: null, eventId: 'e-1', channel: request.channel })}\n`));
+    try {
+      await login(helper.home);
+      const env = { PEERBAND_CONFIG_HOME: helper.home };
+      const connected = channelServer({ body: { channels: [...CHANNELS, { name: 'telegram', format: 'telegram', state: 'active', events: ['agent.notified'] }] } });
+      const sent = await runCli(['notify', '--channel', 'telegram', 'Ready to merge?'], { env, overrides: { fetch: connected.fetch } });
+      expect(sent.code, sent.stderr).toBe(0);
+      expect(sent.stdout).toContain('Note sent to channel telegram');
+      expect(helper.received).toEqual([{ token: 'secret-token', command: 'notify', text: 'Ready to merge?', channel: 'telegram' }]);
+      const missing = await runCli(['notify', '--channel', 'telegram', 'Ready to merge?'], { env, overrides: { fetch: channelServer().fetch } });
+      expect(missing.code).toBe(1);
+      expect(missing.stderr).toContain('has not connected Telegram');
+      expect(missing.stderr).toContain('https://peerband.com/dashboard');
+      expect(helper.received).toHaveLength(1);
+    } finally {
+      await helper.close();
+    }
+  });
+
   it('says the relay is too old when it does not echo the channel', async () => {
     // A relay from before channels drops the field and answers as usual.
     const sent = await fakeHelper({ ok: true, sent: true, agentId: null, eventId: 'e-1' });
