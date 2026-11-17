@@ -1,5 +1,6 @@
 import { CHANNEL_NAME, codePoints, NOTE_MAX_CHARS } from '../../core/index.js';
-import { flag, str } from '../args.js';
+import { flag, str, strs } from '../args.js';
+import { checkFiles, discard, formatSize, type UploadedFile, uploadFile } from '../attachments.js';
 import { ControlUnavailable, requestNotify } from '../control.js';
 import { sanitize, symbols } from '../output.js';
 import { CliError, type CommandSpec, type Ctx, UsageError } from '../types.js';
@@ -43,17 +44,38 @@ async function checkChannel(name: string, ctx: Ctx): Promise<void> {
   }
 }
 
-export async function notify(text: string, json: boolean, ctx: Ctx, channel?: string, agent?: string): Promise<number> {
+export async function notify(text: string, json: boolean, ctx: Ctx, channel?: string, agent?: string, attach: string[] = []): Promise<number> {
   if (channel !== undefined && !CHANNEL_NAME.test(channel)) throw new UsageError(`"${sanitize(channel)}" is not a channel name.`, 'Channel names are 1 to 32 lowercase letters, digits or dashes, starting with a letter or digit. See `peerband channels`.');
-  if (text.trim().length === 0) throw new UsageError('The note is empty.', 'Pass a short note, for example `peerband notify "Migration finished, 3 tests failing"`.');
+  // With files the text is an optional caption.
+  if (text.trim().length === 0 && attach.length === 0) throw new UsageError('The note is empty.', 'Pass a short note, for example `peerband notify "Migration finished, 3 tests failing"`.');
   if (codePoints(text) > NOTE_MAX_CHARS) throw new UsageError(`The note is ${codePoints(text)} characters; the limit is ${NOTE_MAX_CHARS}.`, 'Shorten it to the result or the decision you need; leave details in a file or the agent output.');
   if (agent !== undefined && (agent.length < 1 || agent.length > 256 || /[\x00-\x1f\x7f]/.test(agent))) throw new UsageError('Invalid agent id.', 'Use the exact agent id in the relayed reply instructions.');
+  const local = await checkFiles(attach);
   if (channel !== undefined) await checkChannel(channel, ctx);
   const paneId = callingPane(ctx.env);
+  // Files are uploaded first (straight to PeerBand's file storage); the note then carries their ids.
+  const files: UploadedFile[] = [];
+  const credentials = local.length ? await requireCredentials(ctx) : undefined;
+  if (credentials) {
+    for (const file of local) {
+      if (!json) ctx.out.print(ctx.out.stdout.dim(`Uploading ${sanitize(file.name)} (${formatSize(file.size)})…`));
+      try {
+        files.push(await uploadFile(ctx, credentials, file, agent));
+      } catch (error) {
+        for (const done of files) await discard(ctx, credentials, done.id);
+        throw error;
+      }
+    }
+  }
+  const ids = files.map((file) => file.id);
+  const unsent = async () => {
+    if (credentials) for (const id of ids) await discard(ctx, credentials, id);
+  };
   let reply: Record<string, unknown>;
   try {
-    reply = await requestNotify({ text, ...(agent !== undefined ? { agentId: agent } : {}), ...(paneId ? { paneId } : {}), ...(channel !== undefined ? { channel } : {}) }, ctx.env);
+    reply = await requestNotify({ text, ...(agent !== undefined ? { agentId: agent } : {}), ...(paneId ? { paneId } : {}), ...(channel !== undefined ? { channel } : {}), ...(ids.length ? { attachments: ids } : {}) }, ctx.env);
   } catch (error) {
+    await unsent();
     if (error instanceof ControlUnavailable && error.reason === 'closed') {
       throw new CliError(agent !== undefined ? 'The relay closed before confirming the explicit-agent notification. It may need an update; delivery is unconfirmed.' : 'The running relay does not support notes yet.', 'Run `peerband update` to update the CLI and the Herdr plugin, which restarts the relay.');
     }
@@ -61,6 +83,7 @@ export async function notify(text: string, json: boolean, ctx: Ctx, channel?: st
     throw new CliError('No PeerBand relay is running on this machine.', START_RELAY);
   }
   if (typeof reply.error === 'string') {
+    await unsent();
     const message = typeof reply.message === 'string' ? sanitize(reply.message) : 'The note could not be sent.';
     const next = typeof reply.nextStep === 'string' ? sanitize(reply.nextStep) : undefined;
     if (reply.error === 'not-running') throw new CliError(`${message} The note was not sent.`, START_RELAY);
@@ -76,29 +99,47 @@ export async function notify(text: string, json: boolean, ctx: Ctx, channel?: st
       'Run `peerband update` to update the CLI and the Herdr plugin, which restarts the relay.',
     );
   }
+  // A relay that predates attachments drops them.
+  if (ids.length && !(Array.isArray(reply.attachments) && ids.every((id) => (reply.attachments as unknown[]).includes(id)))) {
+    await unsent();
+    throw new CliError(
+      reply.sent === true
+        ? 'The relay running on this machine is too old for files, so the note was sent without them.'
+        : 'The relay running on this machine is too old for files. The note was not sent.',
+      'Run `peerband update` to update the CLI and the Herdr plugin, which restarts the relay.',
+    );
+  }
   if (agent !== undefined && reply.agentId !== agent) throw new CliError('The relay did not confirm the requested agent identity.', 'Run `peerband update`; do not resend without --agent.');
-  if (reply.sent !== true) throw new CliError('The relay is not connected to PeerBand right now, so the note was not delivered.', 'Check `peerband status`; send the note again once the relay shows Connected.');
+  if (reply.sent !== true) {
+    await unsent();
+    throw new CliError('The relay is not connected to PeerBand right now, so the note was not delivered.', 'Check `peerband status`; send the note again once the relay shows Connected.');
+  }
   const agentId = typeof reply.agentId === 'string' ? reply.agentId : null;
   if (json) {
-    ctx.out.print(JSON.stringify({ sent: true, agentId, eventId: typeof reply.eventId === 'string' ? reply.eventId : null, ...(channel !== undefined ? { channel } : {}) }, null, 2));
+    ctx.out.print(JSON.stringify({
+      sent: true, agentId, eventId: typeof reply.eventId === 'string' ? reply.eventId : null, ...(channel !== undefined ? { channel } : {}),
+      ...(files.length ? { attachments: files.map(({ id, name, size, contentType, url, urlExpiresAt }) => ({ id, name, size, contentType, url, urlExpiresAt })) } : {}),
+    }, null, 2));
     return 0;
   }
   const s = ctx.out.stdout;
   const target = channel !== undefined ? `channel ${s.bold(channel)}` : 'the machine owner';
-  ctx.out.print(`${s.green(symbols.ok)} Note sent to ${target}${agentId ? s.dim(` (from agent ${sanitize(agentId)})`) : ''}.`);
+  const withFiles = files.length ? ` with ${files.length === 1 ? '1 file' : `${files.length} files`}` : '';
+  ctx.out.print(`${s.green(symbols.ok)} Note sent to ${target}${withFiles}${agentId ? s.dim(` (from agent ${sanitize(agentId)})`) : ''}.`);
   return 0;
 }
 
 export const spec: CommandSpec = {
   name: 'notify',
   summary: 'Send a short note from an agent to the machine owner',
-  usage: 'peerband notify "<text>" [--channel NAME] [--agent ID] [--json]',
+  usage: 'peerband notify "<text>" [--attach PATH]... [--channel NAME] [--agent ID] [--json]',
   description:
-    "Sends a short note (1 to 1024 characters) through the running relay to the owner of this machine, for example when a long task finished or an agent is blocked on a decision. Run it from inside a Herdr pane and the note names the agent in that pane. The note goes to the owner only, never to people this machine is shared with. Control characters are removed and likely secrets are redacted (best effort), but do not put credentials or personal data in notes.\n\nWithout --channel the note goes to the PeerBand dashboard, to every owner webhook that takes notes and, once the owner has connected Telegram, to their Telegram chat with the PeerBand bot (unless they turned notes off there). With --channel NAME it still appears in the dashboard (marked with the channel name), but only that one channel receives it: `telegram` for the owner's Telegram (even with notes turned off there), or a webhook such as a Slack channel; see `peerband channels`. The channel is checked first: an unknown or inactive channel is an error and nothing is sent.",
+    "Sends a short note (1 to 1024 characters) through the running relay to the owner of this machine, for example when a long task finished or an agent is blocked on a decision. Run it from inside a Herdr pane and the note names the agent in that pane. The note goes to the owner only, never to people this machine is shared with. Control characters are removed and likely secrets are redacted (best effort), but do not put credentials or personal data in notes.\n\nWithout --channel the note goes to the PeerBand dashboard, to every owner webhook that takes notes and, once the owner has connected Telegram, to their Telegram chat with the PeerBand bot (unless they turned notes off there). With --channel NAME it still appears in the dashboard (marked with the channel name), but only that one channel receives it: `telegram` for the owner's Telegram (even with notes turned off there), or a webhook such as a Slack channel; see `peerband channels`. The channel is checked first: an unknown or inactive channel is an error and nothing is sent.\n\nWith --attach (up to 5 times) the note carries files, such as a screenshot or a report. They are uploaded to PeerBand's file storage first, then the note is sent. The owner sees them in the dashboard, in Telegram (as photos and files where Telegram takes them, otherwise as download links) and as links in webhooks; the AI Concierge can open images, PDFs and text files. Files are kept for 30 days; their links stop working when the owner deletes them. The note text is optional with files. Files are not checked for secrets: attach only what the owner should see.",
   options: [
     { name: 'channel', type: 'string', valueName: 'NAME', description: 'Deliver the note to this one channel (`telegram`, or a webhook name) instead of everywhere notes go; it still shows in the dashboard (see `peerband channels`).' },
     { name: 'agent', type: 'string', valueName: 'ID', description: 'Use this exact current agent id instead of inferring it from the calling pane. Fails if the id is stale or disallowed.' },
-    { name: 'json', type: 'boolean', description: 'Print a machine-readable result: {sent, agentId, eventId}, plus channel with --channel.' },
+    { name: 'attach', type: 'string', valueName: 'PATH', multiple: true, description: 'Send a file with the note (repeat for up to 5 files). Needs `peerband login`.' },
+    { name: 'json', type: 'boolean', description: 'Print a machine-readable result: {sent, agentId, eventId}, plus channel with --channel and attachments (id, name, size, url) with --attach.' },
   ],
   positionals: { name: 'text', max: 64 },
   examples: [
@@ -106,15 +147,18 @@ export const spec: CommandSpec = {
     ['peerband notify "Blocked: should I drop the legacy table?"', 'Ask the owner for a decision'],
     ['peerband notify --channel telegram "Tests pass; ready to merge?"', "Send to the owner's Telegram"],
     ['peerband notify --channel deploys "Release 2.3 is live"', 'Send to one channel (an owner webhook)'],
+    ['peerband notify --attach screenshot.png "The new login page"', 'Send a screenshot with the note'],
+    ['peerband notify --attach report.pdf --attach coverage.txt "Audit done"', 'Send several files'],
     ['peerband notify --json "Build green"', 'For scripts: prints the event id'],
   ],
   notes: [
     'Needs the relay (`peerband relay`) to be running and connected; nothing is queued while it is offline.',
-    '--channel also needs `peerband login`: the channel is checked with PeerBand before the note is sent.',
+    '--channel and --attach also need `peerband login`: the channel is checked, and files are uploaded, before the note is sent.',
     'Several words without quotes are joined with spaces.',
   ],
   async run(parsed, ctx) {
-    if (parsed.positionals.length === 0) throw new UsageError('Missing the note text.', 'Usage: peerband notify "<text>"');
-    return notify(parsed.positionals.join(' '), flag(parsed, 'json'), ctx, str(parsed, 'channel'), str(parsed, 'agent'));
+    const attach = strs(parsed, 'attach');
+    if (parsed.positionals.length === 0 && attach.length === 0) throw new UsageError('Missing the note text.', 'Usage: peerband notify "<text>"');
+    return notify(parsed.positionals.join(' '), flag(parsed, 'json'), ctx, str(parsed, 'channel'), str(parsed, 'agent'), attach);
   },
 };

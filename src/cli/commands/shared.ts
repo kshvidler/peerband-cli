@@ -38,10 +38,15 @@ export async function installationCall(ctx: Ctx, credentials: Credentials, metho
   if (response.status === 204) return null;
   const parsed = (await response.json().catch(() => ({}))) as Record<string, unknown>;
   if (response.ok) return parsed;
-  const detail = typeof parsed.detail === 'string' ? parsed.detail : `HTTP ${response.status}`;
   if (response.status === 401) throw new CliError("PeerBand rejected this machine's credential (it may have been revoked).", 'Run `peerband login` again to sign in.');
   if (response.status === 404 && notFound) throw new CliError(notFound);
-  throw new CliError(sanitize(detail));
+  // FastAPI errors: {"detail": "text"} or {"detail": {"code", "message", "next_step"}}.
+  const detail = parsed.detail;
+  if (detail && typeof detail === 'object' && typeof (detail as Record<string, unknown>).message === 'string') {
+    const body = detail as Record<string, unknown>;
+    throw new CliError(sanitize(body.message as string), typeof body.next_step === 'string' ? sanitize(body.next_step) : undefined);
+  }
+  throw new CliError(sanitize(typeof detail === 'string' ? detail : `HTTP ${response.status}`));
 }
 
 /** The connector config this machine uses: an explicit path, $PEERBAND_CONNECTOR_CONFIG, or connector.json in the config home (optional). */

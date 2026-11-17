@@ -71,7 +71,12 @@ export function parseArgs(spec: Pick<CommandSpec, 'name' | 'options' | 'position
       value = next;
       i++;
     }
-    values[option.name] = value;
+    if (option.multiple) {
+      const previous = values[option.name];
+      values[option.name] = [...(Array.isArray(previous) ? previous : []), value];
+    } else {
+      values[option.name] = value;
+    }
   }
   const max = spec.positionals?.max ?? 0;
   if (positionals.length > max) {
@@ -85,3 +90,8 @@ export const str = (parsed: Parsed, name: string): string | undefined => {
   return typeof value === 'string' ? value : undefined;
 };
 export const flag = (parsed: Parsed, name: string): boolean => parsed.values[name] === true;
+/** Every value of a repeatable string option, in order. */
+export const strs = (parsed: Parsed, name: string): string[] => {
+  const value = parsed.values[name];
+  return Array.isArray(value) ? value : typeof value === 'string' ? [value] : [];
+};

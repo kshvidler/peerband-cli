@@ -149,7 +149,7 @@ The plugin adds a persistent tab titled `PeerBand Relay [On]` or `[Off]` that sh
 | `peerband relay` | Open or focus the Relay tab in Herdr. If the plugin is missing the wrong version, a local checkout, or points at another config directory, it offers to repair it first |
 | `peerband skill` | Install or update the PeerBand agent skill for every coding agent on this machine (through `npx skills add`, falling back to a copy). Keeps a skill you edited unless `--force`; `--copy` skips npx |
 | `peerband share` | Create a single-use invite link that shares this machine with another PeerBand user (read only; `--message` also allows messages; `--expires DAYS`, default 7). `share list` shows who has access and unused links; `share revoke ID` removes access or cancels a link |
-| `peerband notify "<text>"` | From inside a Herdr pane: send the machine owner a short note (1 to 1024 characters) through the running relay, for example when a long task finished or an agent is blocked on a decision. The note names the agent in that pane. `--channel NAME` sends it to one of your channels instead, such as `telegram` (see below). `--json` for machine-readable output |
+| `peerband notify "<text>"` | From inside a Herdr pane: send the machine owner a short note (1 to 1024 characters) through the running relay, for example when a long task finished or an agent is blocked on a decision. The note names the agent in that pane. `--channel NAME` sends it to one of your channels instead, such as `telegram` (see below). `--attach PATH` (up to 5 times) sends files with it, such as a screenshot or a report. `--json` for machine-readable output |
 | `peerband channels` | List the channels this machine can send notes to (name, format, state). `--json` for machine-readable output |
 | `peerband herdr install` | Install (or update) the Herdr plugin. Stops the relay and closes its tab first, puts the previous plugin back if the new one fails, and reopens the tab afterwards |
 | `peerband herdr uninstall` | Stop the relay, close its tab, remove the plugin and its `settings.json`, and delete the local relay state and stale locks (your login is kept) |
@@ -197,7 +197,10 @@ Agents can report back on their own with `peerband notify`:
 
 ```sh
 peerband notify "Migration finished, 3 tests failing"
+peerband notify --attach screenshot.png "The new login page"
 ```
+
+With `--attach`, files are uploaded to PeerBand's file storage first (straight from this machine, with a short-lived upload URL bound to the file's size and SHA-256), then the note is sent with their IDs. You see them in the dashboard and in Telegram (as photos and documents where Telegram takes them, otherwise as download links), webhooks get download links, and the AI Concierge can open images, PDFs and text files. Files are kept for 30 days; deleting one in the dashboard stops its links at once. Files you send an agent from the dashboard or Telegram reach it as download links in the message.
 
 The note goes to the machine owner only (never to people you shared the machine with). Control characters are removed and likely secrets are redacted, best effort, like agent output. It needs the Relay tab's helper to be running and connected; a note sent while it is offline fails with an error instead of being queued. The [agent skill](#agent-skill) tells agents when to use it. The wire format is in [protocol/](protocol/README.md).
 

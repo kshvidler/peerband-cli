@@ -63,10 +63,12 @@ export interface OptionSpec {
   valueName?: string;
   description: string;
   hidden?: boolean;
+  /** A string option that may be given more than once; its values are collected in order. */
+  multiple?: boolean;
 }
 
 export interface Parsed {
-  values: Record<string, string | boolean | undefined>;
+  values: Record<string, string | string[] | boolean | undefined>;
   positionals: string[];
 }
 
