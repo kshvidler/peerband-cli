@@ -48,6 +48,19 @@ export const NOTE_MAX_CHARS = 1024;
 /** A channel is one of the owner's webhook endpoints, addressed by its name (`peerband notify --channel`). */
 export const CHANNEL_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const PANE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
+/** Files a note carries: ids from PeerBand's attachment API (`peerband notify --attach`). */
+export const ATTACHMENT_ID = /^att_[A-Za-z0-9_-]{20,40}$/;
+export const MAX_NOTE_ATTACHMENTS = 5;
+
+/** Validates the optional attachment ids of a note. */
+export function noteAttachments(value: unknown): string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_NOTE_ATTACHMENTS || new Set(value).size !== value.length
+      || value.some((id) => typeof id !== 'string' || !ATTACHMENT_ID.test(id))) {
+    throw new ConnectError('invalid_argument', 'Invalid attachments.', `Attach 1 to ${MAX_NOTE_ATTACHMENTS} files uploaded with \`peerband notify --attach\`.`);
+  }
+  return value as string[];
+}
 
 export function eventFrame(name: EventName, data: Record<string, unknown>, now: Date = new Date()): EventFrame {
   return { type: 'event', eventId: randomUUID(), name, timestamp: now.toISOString(), data };
@@ -95,7 +108,7 @@ export interface ConnectorEventsOptions {
   log?: (message: string) => void;
 }
 
-export interface NotifyResult { sent: boolean; agentId: string | null; eventId?: string; channel?: string }
+export interface NotifyResult { sent: boolean; agentId: string | null; eventId?: string; channel?: string; attachments?: string[] }
 
 /**
  * Turns runtime events into relay frames: applies the agent allow-lists, coalesces bursts per agent, caps the
@@ -188,15 +201,17 @@ export class ConnectorEvents implements RelayEventChannel {
   }
 
   /** Sends an owner-directed note. Resolves the calling pane to an agent id when the runtime can. */
-  async notify(input: { text: unknown; paneId?: unknown; agentId?: unknown; channel?: unknown }): Promise<NotifyResult> {
+  async notify(input: { text: unknown; paneId?: unknown; agentId?: unknown; channel?: unknown; attachments?: unknown }): Promise<NotifyResult> {
     if (!this.adapter.getCapabilities().readOutput) throw new ConnectError('unsupported_capability', 'This connector does not share agent output, so notes are turned off.', 'Use a runtime with output support.');
-    const text = cleanNote(input.text);
+    const attachments = noteAttachments(input.attachments);
+    // With files the text is an optional caption.
+    const text = attachments && (typeof input.text !== 'string' || input.text.trim() === '') ? '' : cleanNote(input.text);
     const channel = noteChannel(input.channel);
     const agentId = input.agentId !== undefined
       ? await this.explicitAgent(input.agentId)
       : await this.resolveAgent(input.paneId);
-    // The channel is echoed back so `peerband notify --channel` can tell this relay from one that ignores it.
-    const echo = channel ? { channel } : {};
+    // The channel and attachments are echoed back so `peerband notify` can tell this relay from one that ignores them.
+    const echo = { ...(channel ? { channel } : {}), ...(attachments ? { attachments } : {}) };
     if (!this.send) return { sent: false, agentId, ...echo };
     this.refillNotes();
     if (this.noteTokens < 1) throw new ConnectError('rate_limited', `Too many notes: at most ${this.notesPerMinute} per minute.`, 'Wait a minute, and send one note per important result.');

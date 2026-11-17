@@ -175,6 +175,27 @@ describe('notes', () => {
     expect(sent).toHaveLength(3);
   });
 
+  it('carries attachment ids, with the text as an optional caption', async () => {
+    const validate = await relaySchema();
+    const events = new ConnectorEvents(new MockRuntime());
+    const sent: EventFrame[] = [];
+    events.attach((frame) => { sent.push(frame); return true; });
+    const ids = ['att_' + 'a'.repeat(24), 'att_' + 'b'.repeat(24)];
+    const result = await events.notify({ text: 'Screenshots', attachments: ids });
+    expect(result).toMatchObject({ sent: true, attachments: ids });
+    expect(sent.at(-1)!.data).toEqual({ agentId: null, text: 'Screenshots', audience: 'owner', attachments: ids });
+    expect(validate(sent.at(-1))).toBe(true);
+    await events.notify({ text: '', attachments: ids.slice(0, 1) });
+    expect(sent.at(-1)!.data).toMatchObject({ text: '', attachments: ids.slice(0, 1) });
+    expect(validate(sent.at(-1))).toBe(true);
+    for (const attachments of [[], ['nope'], [ids[0], ids[0]], Array(6).fill(ids[0]), 'att_x']) {
+      await expect(events.notify({ text: 'hi', attachments }), JSON.stringify(attachments)).rejects.toMatchObject({ code: 'invalid_argument' });
+    }
+    await expect(events.notify({ text: '' })).rejects.toMatchObject({ code: 'invalid_argument' });
+    // Without attachments a frame with empty text does not validate.
+    expect(validate({ ...sent.at(-1)!, data: { agentId: null, text: '', audience: 'owner' } })).toBe(false);
+  });
+
   it('uses an explicit current agent instead of a missing or stale pane', async () => {
     const { events, adapter, sent, send } = harness();
     const agents = await adapter.listAgents();

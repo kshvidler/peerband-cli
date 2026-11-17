@@ -294,6 +294,130 @@ describe('peerband notify through the real relay helper', () => {
 });
 
 
+interface Call { method: string; url: string; auth: string | null; headers: Record<string, string>; body: unknown }
+
+/** PeerBand's attachment API and file storage, answering like the server. */
+function fileServer(options: { createStatus?: number; uploadStatus?: number } = {}) {
+  const calls: Call[] = [];
+  let next = 0;
+  const fake = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    const headers = Object.fromEntries(new Headers(init?.headers).entries());
+    const raw = init?.body;
+    const body = typeof raw === 'string' ? JSON.parse(raw) : raw ? Buffer.from(raw as Uint8Array).toString() : undefined;
+    calls.push({ method: init?.method ?? 'GET', url, auth: headers.authorization ?? null, headers, body });
+    if (url.startsWith('https://files.example/')) return new Response('', { status: options.uploadStatus ?? 200 });
+    if (url.endsWith('/api/installation/attachments')) {
+      if (options.createStatus) return new Response(JSON.stringify({ detail: { code: 'file_too_large', message: 'The file is 12 MB; the limit is 10 MB per file.', next_step: 'Premium allows larger files.' } }), { status: options.createStatus });
+      const id = `att_${String(++next).padStart(24, 'x')}`;
+      const request = body as { filename: string; size: number; contentType: string; sha256: string };
+      return new Response(JSON.stringify({
+        attachment: { id, name: request.filename, size: request.size, contentType: request.contentType, kind: 'image', state: 'pending' },
+        upload: { url: `https://files.example/${id}?sig=1`, method: 'PUT', headers: { 'Content-Type': request.contentType, 'x-amz-checksum-sha256': 'c2hh' }, expiresAt: '2026-11-17T12:00:00Z' },
+      }), { status: 201 });
+    }
+    const complete = /\/api\/installation\/attachments\/(att_[x\d]+)\/complete$/.exec(url);
+    if (complete) {
+      return new Response(JSON.stringify({ attachment: { id: complete[1], name: 'shot.png', size: 4, contentType: 'image/png', kind: 'image', state: 'ready', url: `https://peerband.com/api/files/${complete[1]}/shot.png?t=1.x`, urlExpiresAt: '2026-11-24T12:00:00Z' } }));
+    }
+    if (init?.method === 'DELETE') return new Response(null, { status: 204 });
+    return new Response(JSON.stringify({ detail: 'Not Found' }), { status: 404 });
+  }) as typeof globalThis.fetch;
+  return { fetch: fake, calls };
+}
+
+describe('peerband notify --attach', () => {
+  async function setup(reply: ((request: Record<string, unknown>, socket: Socket) => void) | Record<string, unknown>) {
+    const helper = await fakeHelper(reply);
+    await saveCredentials({ serverUrl: 'https://peerband.com', installationId: 'inst-1', credential: 'machine-secret', machineName: 'work-box' }, join(helper.home, 'credentials.json'));
+    const file = join(helper.home, 'shot.png');
+    await writeFile(file, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    return { helper, file };
+  }
+  const echo = (request: Record<string, unknown>, socket: Socket) =>
+    socket.end(`${JSON.stringify({ ok: true, sent: true, agentId: 'herdr_abc', eventId: '7b0e7c1e-6f7e-4a59-9d55-2f8f3a3c1d11', attachments: request.attachments })}\n`);
+
+  it('uploads the file, then sends the note with its id', async () => {
+    const { helper, file } = await setup(echo);
+    const server = fileServer();
+    try {
+      const result = await runCli(['notify', '--attach', file, 'The new login page'], { env: { PEERBAND_CONFIG_HOME: helper.home }, overrides: { fetch: server.fetch } });
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stdout).toContain('Uploading shot.png (4 B)');
+      expect(result.stdout).toContain('Note sent to the machine owner with 1 file');
+      const [create, put, complete] = server.calls;
+      expect(create).toMatchObject({ method: 'POST', url: 'https://peerband.com/api/installation/attachments', auth: 'Bearer machine-secret' });
+      expect(create!.body).toEqual({ filename: 'shot.png', size: 4, contentType: 'image/png', sha256: '0f4636c78f65d3639ece5a064b5ae753e3408614a14fb18ab4d7540d2c248543' });
+      expect(put).toMatchObject({ method: 'PUT', url: expect.stringContaining('https://files.example/att_'), auth: null });
+      expect(put!.headers).toMatchObject({ 'content-type': 'image/png', 'x-amz-checksum-sha256': 'c2hh' });
+      expect(complete).toMatchObject({ method: 'POST', url: expect.stringMatching(/\/complete$/) });
+      const id = 'att_' + '1'.padStart(24, 'x');
+      expect(helper.received).toEqual([{ token: 'secret-token', command: 'notify', text: 'The new login page', attachments: [id] }]);
+      expect(JSON.stringify(server.calls)).not.toContain('secret-token');
+    } finally { await helper.close(); }
+  });
+
+  it('sends files without text and prints links in JSON', async () => {
+    const { helper, file } = await setup(echo);
+    const server = fileServer();
+    try {
+      const result = await runCli(['notify', '--json', '--attach', file], { env: { PEERBAND_CONFIG_HOME: helper.home }, overrides: { fetch: server.fetch } });
+      expect(result.code, result.stderr).toBe(0);
+      const body = JSON.parse(result.stdout) as { attachments: Array<{ id: string; url: string }> };
+      expect(body.attachments).toHaveLength(1);
+      expect(body.attachments[0]!.url).toMatch(/^https:\/\/peerband\.com\/api\/files\/att_/);
+      expect(helper.received[0]).toMatchObject({ command: 'notify', text: '' });
+    } finally { await helper.close(); }
+  });
+
+  it('checks files before uploading anything', async () => {
+    const { helper, file } = await setup(echo);
+    const server = fileServer();
+    try {
+      const missing = await runCli(['notify', '--attach', join(helper.home, 'nope.png'), 'x'], { env: { PEERBAND_CONFIG_HOME: helper.home }, overrides: { fetch: server.fetch } });
+      expect(missing.code).toBe(2);
+      expect(missing.stderr).toContain('There is no file');
+      const folder = await runCli(['notify', '--attach', helper.home, 'x'], { env: { PEERBAND_CONFIG_HOME: helper.home }, overrides: { fetch: server.fetch } });
+      expect(folder.stderr).toContain('is not a file');
+      const many = await runCli(['notify', ...Array(6).fill(['--attach', file]).flat(), 'x'], { env: { PEERBAND_CONFIG_HOME: helper.home }, overrides: { fetch: server.fetch } });
+      expect(many.stderr).toContain('At most 5 files');
+      expect(server.calls).toEqual([]);
+      expect(helper.received).toEqual([]);
+    } finally { await helper.close(); }
+  });
+
+  it('reports server limits and removes uploads an old relay would drop', async () => {
+    const { helper, file } = await setup({ ok: true, sent: true, agentId: null });
+    try {
+      const limited = await runCli(['notify', '--attach', file, 'x'], { env: { PEERBAND_CONFIG_HOME: helper.home }, overrides: { fetch: fileServer({ createStatus: 413 }).fetch } });
+      expect(limited.code).toBe(1);
+      expect(limited.stderr).toContain('the limit is 10 MB per file');
+      expect(limited.stderr).toContain('Premium allows larger files');
+      const server = fileServer();
+      const old = await runCli(['notify', '--attach', file, 'x'], { env: { PEERBAND_CONFIG_HOME: helper.home }, overrides: { fetch: server.fetch } });
+      expect(old.code).toBe(1);
+      expect(old.stderr).toContain('too old for files');
+      expect(old.stderr).toContain('peerband update');
+      expect(server.calls.at(-1)).toMatchObject({ method: 'DELETE', url: expect.stringContaining('/api/installation/attachments/att_') });
+      const failed = fileServer({ uploadStatus: 403 });
+      const upload = await runCli(['notify', '--attach', file, 'x'], { env: { PEERBAND_CONFIG_HOME: helper.home }, overrides: { fetch: failed.fetch } });
+      expect(upload.stderr).toContain('Uploading shot.png failed (HTTP 403)');
+      expect(failed.calls.at(-1)!.method).toBe('DELETE');
+    } finally { await helper.close(); }
+  });
+
+  it('needs a login for files', async () => {
+    const helper = await fakeHelper(echo);
+    const file = join(helper.home, 'a.txt');
+    await writeFile(file, 'hello');
+    try {
+      const result = await runCli(['notify', '--attach', file, 'x'], { env: { PEERBAND_CONFIG_HOME: helper.home } });
+      expect(result.code).toBe(3);
+      expect(helper.received).toEqual([]);
+    } finally { await helper.close(); }
+  });
+});
+
 describe('peerband notify --agent compatibility', () => {
   it('uses a distinct control command so an old helper cannot silently send an unattributed note', async () => {
     const helper = await fakeHelper((_request, socket) => socket.destroy());

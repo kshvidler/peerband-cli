@@ -173,6 +173,7 @@ async function supervise() {
     const text = input.text;
     const paneId = input.paneId;
     const channel = input.channel;
+    const attachments = input.attachments;
     const explicit = input.command === "notify-agent";
     const agentId = input.agentId;
     if (explicit && (typeof agentId !== "string" || agentId.length < 1 || agentId.length > 256)) {
@@ -188,6 +189,11 @@ async function supervise() {
       reply({ error: "invalid", message: "Invalid channel name." }, true);
       return;
     }
+    // Attachment ids (`peerband notify --attach`); the connector validates them.
+    if (attachments !== undefined && (!Array.isArray(attachments) || attachments.length > 5 || attachments.some((value) => typeof value !== "string" || value.length > 64))) {
+      reply({ error: "invalid", message: "Invalid attachments." }, true);
+      return;
+    }
     const current = child;
     if (!current || stopping || finalStop || !current.connected) {
       reply({ error: "not-running", message: "The relay is turned off." }, true);
@@ -200,7 +206,7 @@ async function supervise() {
     }, 5000);
     timer.unref();
     pendingNotes.set(id, { reply, timer });
-    current.send({ type: explicit ? "peerband:notify-agent" : "peerband:notify", id, text, ...(explicit ? { agentId } : {}), ...(paneId ? { paneId } : {}), ...(channel ? { channel } : {}) }, (error) => {
+    current.send({ type: explicit ? "peerband:notify-agent" : "peerband:notify", id, text, ...(explicit ? { agentId } : {}), ...(paneId ? { paneId } : {}), ...(channel ? { channel } : {}), ...(attachments?.length ? { attachments } : {}) }, (error) => {
       if (!error || !pendingNotes.delete(id)) return;
       clearTimeout(timer);
       reply({ error: "not-running", message: "The connector is not reachable." }, true);
@@ -213,7 +219,7 @@ async function supervise() {
     clearTimeout(pending.timer);
     const text = (value, max) => (typeof value === "string" ? value.slice(0, max) : undefined);
     pending.reply(message.ok === true
-      ? { ok: true, sent: message.sent === true, agentId: text(message.agentId, 256) ?? null, ...(text(message.eventId, 64) ? { eventId: text(message.eventId, 64) } : {}), ...(text(message.channel, 64) ? { channel: text(message.channel, 64) } : {}) }
+      ? { ok: true, sent: message.sent === true, agentId: text(message.agentId, 256) ?? null, ...(text(message.eventId, 64) ? { eventId: text(message.eventId, 64) } : {}), ...(text(message.channel, 64) ? { channel: text(message.channel, 64) } : {}), ...(Array.isArray(message.attachments) ? { attachments: message.attachments.filter((value) => typeof value === "string").slice(0, 5).map((value) => value.slice(0, 64)) } : {}) }
       : { error: text(message.code, 64) ?? "error", message: text(message.message, 512) ?? "The note could not be sent.", ...(text(message.nextStep, 512) ? { nextStep: text(message.nextStep, 512) } : {}) }, true);
   }
   const failNotes = () => {
