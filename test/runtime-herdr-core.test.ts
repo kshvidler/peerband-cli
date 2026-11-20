@@ -7,11 +7,11 @@ import { FakeCore, NO_REPLY, type FakeTerminal } from './fixtures/fake-core.js';
 const adapters: HerdrCoreAdapter[] = [];
 afterEach(async () => { await Promise.all(adapters.splice(0).map((adapter) => adapter.close())); });
 
-function setup(terminals: FakeTerminal[] = [], layout: unknown = null, options: { timeoutMs?: number } = {}) {
+function setup(terminals: FakeTerminal[] = [], layout: unknown = null, options: { timeoutMs?: number; nudgeMs?: number } = {}) {
   const core = new FakeCore();
   core.terminals = terminals;
   core.layout = layout;
-  const adapter = new HerdrCoreAdapter({ streamFactory: core.factory, machineId: 'machine-1', settleMs: 5, sleep: () => new Promise((resolve) => setTimeout(resolve, 5)), ...options });
+  const adapter = new HerdrCoreAdapter({ streamFactory: core.factory, machineId: 'machine-1', settleMs: 5, nudgeMs: 1, sleep: () => new Promise((resolve) => setTimeout(resolve, 5)), ...options });
   adapters.push(adapter);
   return { core, adapter };
 }
@@ -99,6 +99,34 @@ describe('HerdrCoreAdapter', () => {
     await adapter.sendMessage(agent!.id, 'Run the tests');
     expect(core.calls.filter((call) => call.method === 'terminal.send')).toEqual([{ method: 'terminal.send', params: { terminal: 't1', text: 'Run the tests' } }]);
     expect(core.calls.some((call) => call.method === 'terminal.get' && call.params.terminal === 't1')).toBe(true);
+  });
+
+  it('presses Enter once more when a long message stays in the input box (Codex)', async () => {
+    const codex = claude({ name: 'codex', argv: ['codex'], status: { state: 'idle', app: 'codex' } });
+    const { core, adapter } = setup([codex]);
+    const [agent] = await adapter.listAgents();
+    const keys = () => core.calls.filter((call) => call.method === 'terminal.keys');
+    core.overrides.set('terminal.send', () => ({ started: false, status: 'idle', turn: 2 }));
+    await adapter.sendMessage(agent!.id, 'A long relayed message');
+    expect(keys()).toEqual([{ method: 'terminal.keys', params: { terminal: 't1', keys: ['enter'] } }]);
+    // Started, unknown (no status reports) or busy when it went in: no extra key.
+    for (const result of [{ started: true, status: 'idle', turn: 3 }, { started: null, status: null, turn: 4 }, { started: false, status: 'working', turn: 5 }]) {
+      core.overrides.set('terminal.send', () => result);
+      await adapter.sendMessage(agent!.id, 'hi');
+    }
+    expect(keys()).toHaveLength(1);
+    // It started working by the time of the recheck: no extra key either.
+    core.overrides.set('terminal.send', () => { core.terminals[0]!.status = { state: 'working', app: 'codex' }; return { started: false, status: 'idle', turn: 6 }; });
+    await adapter.sendMessage(agent!.id, 'hi');
+    expect(keys()).toHaveLength(1);
+  });
+
+  it('treats a failed extra Enter as delivered', async () => {
+    const { core, adapter } = setup([claude()]);
+    const [agent] = await adapter.listAgents();
+    core.overrides.set('terminal.send', () => ({ started: false, status: 'idle', turn: 2 }));
+    core.overrides.set('terminal.keys', () => { throw { kind: 'unavailable', message: 'lost' }; });
+    await expect(adapter.sendMessage(agent!.id, 'hi')).resolves.toBeUndefined();
   });
 
   it('never types into a blocked agent, a replaced program or with an invalid message', async () => {

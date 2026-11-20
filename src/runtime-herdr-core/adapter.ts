@@ -14,6 +14,8 @@ export interface HerdrCoreAdapterOptions {
   /** Test seams for the event stream. */
   sleep?: (ms: number) => Promise<void>;
   settleMs?: number;
+  /** Pause before the extra Enter for a message the agent did not start on (default 400 ms). */
+  nudgeMs?: number;
 }
 
 /** The fields of core's Terminal record the adapter reads (see `hc schema`). */
@@ -69,6 +71,8 @@ export class HerdrCoreAdapter implements RuntimeAdapter {
   private wake?: () => void;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly settleMs: number;
+  private readonly nudgeMs: number;
+  private methods = new Set<string>();
 
   constructor(private readonly options: HerdrCoreAdapterOptions = {}) {
     this.factory = options.streamFactory ?? spawnCoreStream(resolveCoreBinary(options.binary));
@@ -81,6 +85,7 @@ export class HerdrCoreAdapter implements RuntimeAdapter {
       this.wake = () => { clearTimeout(timer); resolve(); };
     }));
     this.settleMs = options.settleMs ?? 150;
+    this.nudgeMs = options.nudgeMs ?? 400;
   }
 
   getCapabilities(): Capabilities {
@@ -199,6 +204,26 @@ export class HerdrCoreAdapter implements RuntimeAdapter {
     }
     const result = await this.call('terminal.send', { terminal: live.terminal.address, text: message }, SEND_TIMEOUT_MS);
     if (!result || typeof result !== 'object' || typeof (result as { turn?: unknown }).turn !== 'number') throw new ConnectError('delivery_unknown', 'herdr-core answered the message with an unexpected result.', 'Read the agent output before deciding whether to send it again.');
+    await this.nudgeUnsubmitted(live, result as { started?: unknown; status?: unknown });
+  }
+
+  /**
+   * Codex reads a long paste followed at once by Enter as part of the paste, so the message stays in its input box
+   * (core reports `started: false`). Every relayed message is long because of its sender line. Press Enter once more
+   * when the agent was not busy and still has not started. An extra Enter on an empty prompt does nothing.
+   */
+  private async nudgeUnsubmitted(live: LiveTarget, result: { started?: unknown; status?: unknown }): Promise<void> {
+    if (result.started !== false || result.status === 'working' || !this.methods.has('terminal.keys')) return;
+    await new Promise((resolve) => setTimeout(resolve, this.nudgeMs));
+    try {
+      const now = await this.call('terminal.get', { terminal: live.terminal.address });
+      if (!isTerminal(now) || now.state !== 'live' || identityFingerprint(this.coreId!, now) !== live.fingerprint) return;
+      const state = now.status?.state;
+      if (state === 'working' || state === 'blocked' || state === 'error') return;
+      await this.call('terminal.keys', { terminal: live.terminal.address, keys: ['enter'] });
+    } catch {
+      // The message is already in the terminal; a failed nudge does not make the delivery uncertain.
+    }
   }
 
   /** The layout as the dashboard shows it. Read only: herdr-core spaces and tabs belong to the desktop app. */
@@ -340,6 +365,7 @@ export class HerdrCoreAdapter implements RuntimeAdapter {
         if (!hello || hello.generation !== PROTOCOL_GENERATION) throw new ConnectError('schema_mismatch', 'This herdr-core speaks a protocol generation PeerBand does not support.', 'Update PeerBand (`peerband update`) and herdr-core (`hc update`).');
         const methods = Array.isArray(hello.methods) ? hello.methods : [];
         const missing = REQUIRED_METHODS.filter((method) => !methods.includes(method));
+        this.methods = new Set(methods.filter((method): method is string => typeof method === 'string'));
         if (missing.length) throw new ConnectError('schema_mismatch', `This herdr-core lacks ${missing.join(', ')}.`, 'Update herdr-core with `hc update`.');
         return typeof hello.core?.id === 'string' ? hello.core.id : 'core';
       })();
