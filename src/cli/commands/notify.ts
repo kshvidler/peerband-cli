@@ -9,10 +9,21 @@ import { requireCredentials } from './shared.js';
 const PANE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 const START_RELAY = 'Start the relay with `peerband relay`.';
 
-/** The Herdr pane this command runs in, if any (Herdr sets HERDR_PANE_ID in every pane). */
+/**
+ * The pane this command runs in, if any: Herdr sets HERDR_PANE_ID in every pane, herdr-core sets
+ * HC_TERMINAL_ID (`t7`) in every terminal. Both can be present (a core started from a Herdr pane passes
+ * HERDR_PANE_ID on to its terminals), so the terminal id also travels separately and the relay uses the one its
+ * runtime knows. The pane id falls back to the terminal id for relays that predate the separate field.
+ */
 export function callingPane(env: NodeJS.ProcessEnv): string | undefined {
-  const pane = env.HERDR_PANE_ID;
-  return typeof pane === 'string' && PANE_ID.test(pane) ? pane : undefined;
+  for (const pane of [env.HERDR_PANE_ID, env.HC_TERMINAL_ID]) if (typeof pane === 'string' && PANE_ID.test(pane)) return pane;
+  return undefined;
+}
+
+/** The herdr-core terminal this command runs in ($HC_TERMINAL_ID), if any. */
+export function callingTerminal(env: NodeJS.ProcessEnv): string | undefined {
+  const terminal = env.HC_TERMINAL_ID;
+  return typeof terminal === 'string' && PANE_ID.test(terminal) ? terminal : undefined;
 }
 
 /** Fails unless `name` is one of this machine's channels and is active, so a typo never sends a note nowhere. */
@@ -50,9 +61,10 @@ export async function notify(text: string, json: boolean, ctx: Ctx, channel?: st
   if (agent !== undefined && (agent.length < 1 || agent.length > 256 || /[\x00-\x1f\x7f]/.test(agent))) throw new UsageError('Invalid agent id.', 'Use the exact agent id in the relayed reply instructions.');
   if (channel !== undefined) await checkChannel(channel, ctx);
   const paneId = callingPane(ctx.env);
+  const terminalId = callingTerminal(ctx.env);
   let reply: Record<string, unknown>;
   try {
-    reply = await requestNotify({ text, ...(agent !== undefined ? { agentId: agent } : {}), ...(paneId ? { paneId } : {}), ...(channel !== undefined ? { channel } : {}) }, ctx.env);
+    reply = await requestNotify({ text, ...(agent !== undefined ? { agentId: agent } : {}), ...(paneId ? { paneId } : {}), ...(terminalId && terminalId !== paneId ? { terminalId } : {}), ...(channel !== undefined ? { channel } : {}) }, ctx.env);
   } catch (error) {
     if (error instanceof ControlUnavailable && error.reason === 'closed') {
       throw new CliError(agent !== undefined ? 'The relay closed before confirming the explicit-agent notification. It may need an update; delivery is unconfirmed.' : 'The running relay does not support notes yet.', 'Run `peerband update` to update the CLI and the Herdr plugin, which restarts the relay.');

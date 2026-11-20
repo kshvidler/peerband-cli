@@ -188,13 +188,15 @@ export class ConnectorEvents implements RelayEventChannel {
   }
 
   /** Sends an owner-directed note. Resolves the calling pane to an agent id when the runtime can. */
-  async notify(input: { text: unknown; paneId?: unknown; agentId?: unknown; channel?: unknown }): Promise<NotifyResult> {
+  async notify(input: { text: unknown; paneId?: unknown; terminalId?: unknown; agentId?: unknown; channel?: unknown }): Promise<NotifyResult> {
     if (!this.adapter.getCapabilities().readOutput) throw new ConnectError('unsupported_capability', 'This connector does not share agent output, so notes are turned off.', 'Use a runtime with output support.');
     const text = cleanNote(input.text);
     const channel = noteChannel(input.channel);
     const agentId = input.agentId !== undefined
       ? await this.explicitAgent(input.agentId)
-      : await this.resolveAgent(input.paneId);
+      // A herdr-core terminal can inherit HERDR_PANE_ID from the Herdr pane that started the core, so both ids
+      // are tried; each runtime only recognises its own.
+      : (await this.resolveAgent(input.paneId)) ?? (await this.resolveAgent(input.terminalId));
     // The channel is echoed back so `peerband notify --channel` can tell this relay from one that ignores it.
     const echo = channel ? { channel } : {};
     if (!this.send) return { sent: false, agentId, ...echo };

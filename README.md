@@ -24,7 +24,7 @@
   <a href="https://peerband.com/dashboard">Dashboard</a>
 </p>
 
-PeerBand connects ChatGPT, Claude or any MCP client to the coding agents (Claude Code, Codex, Gemini CLI, OpenCode and others) running in [Herdr](https://herdr.dev) on your machine. Ask what they're doing, send the next instruction, share access with a teammate, and get a note in Slack, Discord or your own endpoint when an agent needs you.
+PeerBand connects ChatGPT, Claude or any MCP client to the coding agents (Claude Code, Codex, Gemini CLI, OpenCode and others) running in [Herdr](https://herdr.dev) on your machine: the Herdr terminal app, or [herdr-core](https://github.com/herdrdev/herdr-core) (`hc`) and the Herdr desktop app built on it. Ask what they're doing, send the next instruction, share access with a teammate, and get a note in Slack, Discord or your own endpoint when an agent needs you.
 
 This repository is the open-source client: the `peerband` command-line tool and the Herdr plugin. It runs on your machine and connects out to the PeerBand relay; nothing connects in.
 
@@ -47,7 +47,7 @@ This project is unofficial and is not affiliated with Herdr or Amazon.
 ## Requirements
 
 - Node.js 22.13 or newer
-- Herdr 0.9.3 or newer (needed for the Relay tab)
+- Herdr 0.9.3 or newer (needed for the Relay tab), or herdr-core 0.1.21 or newer (`hc`, also installed by the Herdr desktop app)
 - A PeerBand account (peerband.com)
 
 ## Install
@@ -136,6 +136,28 @@ The plugin adds a persistent tab titled `PeerBand Relay [On]` or `[Off]` that sh
 - **Q**, **Esc** or **Ctrl+C** asks to close the tab; press it again to confirm. Closing it disconnects the relay.
 - The tab is reopened when Herdr starts. `peerband relay` opens or focuses it at any time.
 
+## herdr-core and the Herdr desktop app
+
+[herdr-core](https://github.com/herdrdev/herdr-core) (`hc`) runs terminals and agents that keep running after you close the window; the Herdr desktop app draws spaces, tabs and panes on top of it. herdr-core has no plugin tab, so for it the relay runs in the background:
+
+```sh
+peerband relay --core      # connect this machine's herdr-core agents
+peerband status            # Relay: Connected (herdr-core, in the background)
+peerband relay --stop      # disconnect
+```
+
+`peerband setup` starts it for you when herdr-core is installed and the Herdr terminal app is not. It keeps running when you close the desktop app or a terminal, and it reconnects when the core restarts. It does not start again by itself after you log out or restart the computer: run `peerband relay --core` again. One relay serves one runtime per machine, so stop a Herdr Relay tab before starting the herdr-core relay.
+
+How it works:
+
+- The connector talks to the core through `hc connect` (JSON-RPC over stdin and stdout), so it uses the same core, socket and named pipe as `hc` itself, including `HC_SOCKET`. It needs `hc` on `PATH`, `HC_BIN`, or `herdrCore.binary` in `connector.json`.
+- An agent is a live terminal on this machine whose program reports its status through OSC 7501, the way herdr-core and the desktop app see it. Plain shells are not agents. Terminals on machines your core added (`box/t3`) are not shown: run a relay on that machine.
+- Status changes arrive from the core's event stream (`events.subscribe`), never from reading the screen.
+- Spaces and tabs come from the desktop app's layout. Agents that no tab shows, such as ones started with `hc run --bg`, are grouped under **Background**.
+- Messages are typed into the agent's terminal with `terminal.send`, which waits for you to finish an unsent draft (up to a minute). Core refuses to type into a blocked agent. Terminal addresses (`t7`) are never reused, and the connector checks that the same program still runs there right before it sends.
+- `peerband notify` inside a core terminal names its agent through `HC_TERMINAL_ID`.
+- The dashboard shows the layout but cannot change it yet: creating, renaming and closing spaces, tabs and panes is a Herdr terminal app feature for now. Reading a plain shell's output works.
+
 ## Commands
 
 | Command | What it does |
@@ -145,11 +167,11 @@ The plugin adds a persistent tab titled `PeerBand Relay [On]` or `[Off]` that sh
 | `peerband logout` | Stop a running relay, close its tab, delete the local relay state and the local credential. Does not revoke it on the server |
 | `peerband status` | Show login, relay, messaging and Herdr state, including whether the Herdr plugin is the right one. `--json` for machine-readable output |
 | `peerband update` | Update the CLI from npm and then the Herdr plugin to match, restarting the relay if it was running. Already up to date: checks the plugin and repairs it. Flags: `--check` (only report), `--yes`, `--json` |
-| `peerband connect` | Run the connector in the foreground. Flags: `--runtime herdr\|mock`, `--read-only`, `--config PATH`, `--server URL` (`--enable-writes` is still accepted but redundant) |
-| `peerband relay` | Open or focus the Relay tab in Herdr. If the plugin is missing the wrong version, a local checkout, or points at another config directory, it offers to repair it first |
+| `peerband connect` | Run the connector in the foreground. Flags: `--runtime herdr\|herdr-core\|mock`, `--read-only`, `--config PATH`, `--server URL` (`--enable-writes` is still accepted but redundant) |
+| `peerband relay` | Open or focus the Relay tab in Herdr. If the plugin is missing the wrong version, a local checkout, or points at another config directory, it offers to repair it first. `--core` runs the relay in the background for herdr-core instead; `--stop` stops whichever relay is running |
 | `peerband skill` | Install or update the PeerBand agent skill for every coding agent on this machine (through `npx skills add`, falling back to a copy). Keeps a skill you edited unless `--force`; `--copy` skips npx |
 | `peerband share` | Create a single-use invite link that shares this machine with another PeerBand user (read only; `--message` also allows messages; `--expires DAYS`, default 7). `share list` shows who has access and unused links; `share revoke ID` removes access or cancels a link |
-| `peerband notify "<text>"` | From inside a Herdr pane: send the machine owner a short note (1 to 1024 characters) through the running relay, for example when a long task finished or an agent is blocked on a decision. The note names the agent in that pane. `--channel NAME` sends it to one of your channels instead, such as `telegram` (see below). `--json` for machine-readable output |
+| `peerband notify "<text>"` | From inside a Herdr pane or a herdr-core terminal: send the machine owner a short note (1 to 1024 characters) through the running relay, for example when a long task finished or an agent is blocked on a decision. The note names the agent in that pane. `--channel NAME` sends it to one of your channels instead, such as `telegram` (see below). `--json` for machine-readable output |
 | `peerband channels` | List the channels this machine can send notes to (name, format, state). `--json` for machine-readable output |
 | `peerband herdr install` | Install (or update) the Herdr plugin. Stops the relay and closes its tab first, puts the previous plugin back if the new one fails, and reopens the tab afterwards |
 | `peerband herdr uninstall` | Stop the relay, close its tab, remove the plugin and its `settings.json`, and delete the local relay state and stale locks (your login is kept) |
@@ -167,6 +189,7 @@ Optional `connector.json`:
 
 ```json
 {
+  "runtime": "herdr",
   "allowedAgents": ["claude"],
   "allowedWorkspaces": ["my-project"],
   "enableWrites": false,
@@ -177,15 +200,19 @@ Optional `connector.json`:
     "binary": "/path/to/herdr",
     "machineId": "my-laptop",
     "timeoutMs": 5000
+  },
+  "herdrCore": {
+    "binary": "/path/to/hc",
+    "timeoutMs": 10000
   }
 }
 ```
 
-All fields are optional. `enableWrites` defaults to `true`; set it to `false` to make this machine read-only (the same as `peerband connect --read-only`; it also applies to the Relay tab). `allowedAgents` and `allowedWorkspaces` restrict what MCP clients can see; `stateDirectory` moves the receipt store (default `state/` in the config home). The `herdr` block is only needed when Herdr is not on `PATH` or you target a specific session.
+All fields are optional. `enableWrites` defaults to `true`; set it to `false` to make this machine read-only (the same as `peerband connect --read-only`; it also applies to the Relay tab). `allowedAgents` and `allowedWorkspaces` restrict what MCP clients can see; `stateDirectory` moves the receipt store (default `state/` in the config home). The `herdr` block is only needed when Herdr is not on `PATH` or you target a specific session. `runtime` (`herdr` or `herdr-core`) chooses what the connector serves when neither `--runtime` nor `PEERBAND_RUNTIME` is set; `peerband relay --core` always serves herdr-core. The `herdrCore` block is only needed when `hc` is not on `PATH` (the connector also looks in the installer's default folder).
 
 ## Agent events and notes
 
-While the relay is connected, the connector tells PeerBand when one of your agents changes state, so the dashboard and MCP clients can read an agent's output when something happened instead of polling it every few seconds (each read makes the Herdr pane jump). It subscribes to Herdr's socket events (`events.subscribe`: agent status changes, and agents appearing or exiting) and sends small `event` frames over the existing relay connection:
+While the relay is connected, the connector tells PeerBand when one of your agents changes state, so the dashboard and MCP clients can read an agent's output when something happened instead of polling it every few seconds (each read makes the Herdr pane jump). It subscribes to Herdr's socket events (`events.subscribe`: agent status changes, and agents appearing or exiting), or to herdr-core's event stream, and sends small `event` frames over the existing relay connection:
 
 - `agent.status_changed`: agent id, new and previous status (`idle`, `working`, `blocked`, `done`, `unknown`), label, workspace and revision, exactly as `list_agents` reports them.
 - `agents.changed`: agents appeared, exited or changed occupant; clients list agents again. Also sent once after every reconnect.

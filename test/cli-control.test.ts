@@ -38,7 +38,7 @@ describe('relay status over the control channel', () => {
     try {
       const result = await runCli(['status', '--json'], { env: { PEERBAND_CONFIG_HOME: home } });
       const report = JSON.parse(result.stdout);
-      expect(report.relay).toEqual({ running: true, connection: 'connected', source: 'control' });
+      expect(report.relay).toEqual({ running: true, connection: 'connected', source: 'control', runtime: 'herdr' });
       expect(received).toEqual([{ token: 'secret-token', command: 'status' }]);
     } finally {
       await new Promise((resolve) => server.close(resolve));

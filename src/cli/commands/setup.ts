@@ -2,6 +2,9 @@ import { loadCredentials, resolveServerUrl, type Credentials } from '../../core/
 import { flag, str } from '../args.js';
 import { symbols } from '../output.js';
 import { CliError, type CommandSpec, type Ctx, type Parsed, UsageError } from '../types.js';
+import { resolveCoreBinary } from '../../runtime-herdr-core/index.js';
+import { startBackgroundRelay } from '../background.js';
+import { execProgram } from '../exec.js';
 import { herdrSetup } from './herdr-setup.js';
 import { herdrPluginMode, signIn, spec as login } from './login.js';
 import { openRelay } from './relay.js';
@@ -24,6 +27,12 @@ async function existingLogin(parsed: Parsed, ctx: Ctx): Promise<Credentials | un
   } catch {
     return undefined;
   }
+}
+
+/** Whether herdr-core's `hc` runs on this machine. */
+async function coreInstalled(ctx: Ctx): Promise<boolean> {
+  const result = await (ctx.exec ?? execProgram)(resolveCoreBinary(undefined, ctx.env), ['--version'], { env: ctx.env, timeoutMs: 15_000 });
+  return result.code === 0 && /^hc\s/.test(result.stdout.trim());
 }
 
 const loginOptions = login.options.filter((option) => option.name !== 'herdr-plugin');
@@ -79,6 +88,16 @@ export const spec: CommandSpec = {
     let relayOpen = false;
     if (flag(parsed, 'no-relay')) {
       ctx.out.print(s.dim('Skipped. Open it later with `peerband relay`.'));
+    } else if (herdr === 'no-herdr' && await coreInstalled(ctx)) {
+      // No Herdr terminal app, but herdr-core (and so maybe the Herdr desktop app) is here: its relay runs in the background.
+      try {
+        await startBackgroundRelay(ctx, 'herdr-core', { checked: true });
+        relayOpen = true;
+        ctx.out.print(`${s.green(symbols.ok)} PeerBand Relay is running in the background for herdr-core ${s.dim('(stop it with `peerband relay --stop`)')}.`);
+      } catch (error) {
+        ctx.out.warn(`${s.yellow(symbols.warn)} Could not start the PeerBand Relay for herdr-core: ${(error as Error).message}`);
+        if (error instanceof CliError && error.hint) ctx.out.print(s.dim(`  ${error.hint}`));
+      }
     } else if (herdr !== 'ready') {
       ctx.out.print(s.dim(`Not opened: ${herdr === 'no-herdr' ? 'Herdr is not installed' : 'the Herdr plugin is not ready'}. When it is, run \`peerband relay\`.`));
     } else {
