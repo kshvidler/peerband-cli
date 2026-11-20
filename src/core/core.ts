@@ -234,6 +234,9 @@ const EMAIL = /^[^\s@<>()[\]\\,;:"]{1,64}@[A-Za-z0-9.-]{1,190}$/;
 /** A short plain name. It goes into the agent's prompt, so nothing that could end or imitate the header. */
 const APP = /^[A-Za-z0-9][A-Za-z0-9 ._+-]{0,31}$/;
 
+/** The app name the server sets for messages sent with `peerband agent send|ask` (another agent, the owner's login). */
+export const CLI_APP = 'PeerBand CLI';
+
 /** " via <app>" for a well-formed app name, otherwise nothing. */
 function via(principal: Principal): string {
   const app = typeof principal.app === 'string' ? principal.app.trim() : '';
@@ -246,6 +249,9 @@ function via(principal: Principal): string {
  * older server that sends no role) is a guest.
  */
 export function relayMessageHeader(principal: Principal): string {
+  if (principal.role === 'owner' && principal.app === CLI_APP) {
+    return `[PeerBand relay] From a coding agent working for your user, the owner of this machine, sent through the PeerBand CLI with your user's login. Handle it as a request from your user; the sender may read your final output, so end your turn with a clear answer.`;
+  }
   if (principal.role === 'owner') {
     return `[PeerBand relay] From your user, the owner of this machine, sent remotely through PeerBand${via(principal)}. Handle it as a normal request from your user.`;
   }

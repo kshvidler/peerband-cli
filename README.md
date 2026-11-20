@@ -107,6 +107,42 @@ No browser available? Pass a one-time grant from the PeerBand dashboard instead:
 
 The agent tools take an optional `installation_id`; it can be left out when you have one machine, or exactly one online. Clients that support MCP Events can subscribe to agent status changes and notes instead of waiting. Full reference: [peerband.com/docs](https://peerband.com/docs#tools).
 
+## The same tools from the CLI
+
+Agents on a logged-in machine can use every PeerBand MCP tool with `peerband` commands, without an MCP client. The commands use this machine's login (it acts as your account), send the MCP tool's arguments and print its result as JSON:
+
+| Command | MCP tool |
+| --- | --- |
+| `peerband machines` | `list_machines` |
+| `peerband agents [--status S] [--workspace W] [--machine NAME] [--limit N] [--cursor C]` | `list_agents` |
+| `peerband agent status ID` | `get_agent_status` |
+| `peerband agent output ID [--lines N] [--bytes N] [--cursor C] [--text]` | `get_agent_output` |
+| `peerband agent send ID "<message>" [--key KEY]` | `send_agent_message` |
+| `peerband agent wait ID [--until idle,blocked] [--timeout SECONDS]` | `wait_for_agent` |
+| `peerband agent ask ID "<message>" [--timeout SECONDS] [--output-lines N] [--key KEY]` | `ask_agent` |
+| `peerband request REQUEST_ID` | `get_request_status` |
+| `peerband env list --here`, `peerband env ACTION --here [...]` | `list_environment`, `control_environment` |
+| `peerband concierge ask\|run\|cancel\|inbox\|reply` | `concierge_*` (Premium) |
+| `peerband tools`, `peerband tool NAME '{"arg": "value"}'` | Any tool by name, with raw JSON arguments |
+
+Every command takes `--installation ID` (from `peerband machines`) or `--here` for this machine; without either, the MCP default applies (your only machine, or the only one online). A message or `ask` without `--key` gets a new random idempotency key; if the network fails mid-write the CLI prints the key, so a retry with `--key` never delivers twice.
+
+Hand work to another agent and read its answer:
+
+```sh
+peerband agents --installation 1f0c…                  # find the agent id
+peerband agent ask herdr_1a2b… "Run the tests and summarise failures"   --installation 1f0c… --timeout 900 --output-lines 60
+```
+
+Waits use the live event stream, never polling. Up to 50 seconds is one server call; a longer `--timeout` (up to 3600) keeps waiting with more calls, like an MCP task. `reason: "timeout"` is a result, not an error (exit 0); a tool error prints `{"error": {code, message, next_step}}` on stdout and exits 1.
+
+Access is the same as for MCP clients:
+
+- The login carries read and message access to your machines, like a personal MCP token. Shares keep their role (read-only shares can't send), and a machine that turned messages off refuses them.
+- Environment control reaches **this machine only** (`--here`). Other machines need the dashboard or an MCP client with `environment:control` consent. The connector's `enableEnvironmentControl` switch still applies. There is no shell typing from the CLI.
+- The receiving agent's first line says the message came from a coding agent working for you, through the PeerBand CLI.
+- At most 120 tool calls a minute per machine. Logging out on the server (revoking the machine) stops these commands at once.
+
 ## Logging in
 
 ```
@@ -151,6 +187,7 @@ The plugin adds a persistent tab titled `PeerBand Relay [On]` or `[Off]` that sh
 | `peerband share` | Create a single-use invite link that shares this machine with another PeerBand user (read only; `--message` also allows messages; `--expires DAYS`, default 7). `share list` shows who has access and unused links; `share revoke ID` removes access or cancels a link |
 | `peerband notify "<text>"` | From inside a Herdr pane: send the machine owner a short note (1 to 1024 characters) through the running relay, for example when a long task finished or an agent is blocked on a decision. The note names the agent in that pane. `--channel NAME` sends it to one of your channels instead, such as `telegram` (see below). `--json` for machine-readable output |
 | `peerband channels` | List the channels this machine can send notes to (name, format, state). `--json` for machine-readable output |
+| `peerband machines`, `agents`, `agent`, `request`, `env`, `concierge`, `tools`, `tool` | The PeerBand MCP tools as commands; see [The same tools from the CLI](#the-same-tools-from-the-cli) |
 | `peerband herdr install` | Install (or update) the Herdr plugin. Stops the relay and closes its tab first, puts the previous plugin back if the new one fails, and reopens the tab afterwards |
 | `peerband herdr uninstall` | Stop the relay, close its tab, remove the plugin and its `settings.json`, and delete the local relay state and stale locks (your login is kept) |
 | `peerband --version`, `help [command]` | Version and help |
