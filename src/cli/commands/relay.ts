@@ -13,7 +13,7 @@ export const spec: CommandSpec = {
   usage: 'peerband relay [--core] [--stop]',
   description:
     'Opens the PeerBand Relay in a persistent Herdr tab, or focuses it if it is already open. The tab shows your account, connection state and metadata-only activity; closing it disconnects. Requires Herdr and the PeerBand plugin (`peerband herdr install`). If the plugin is wrong (another version, a local checkout, or a stale config directory), relay offers to repair it first.\n\n' +
-    'With --core the relay serves herdr-core (`hc`) instead, the terminal server behind the Herdr desktop app. herdr-core has no plugin tab, so the relay runs in the background: closing the desktop app or a terminal leaves it connected. Check it with `peerband status` and stop it with `peerband relay --stop`. It does not start again by itself after you log out or restart the computer; run `peerband relay --core` again. One relay serves one runtime per machine.',
+    'With --core the relay serves herdr-core (`hc`) instead, the terminal server behind the Herdr desktop app. herdr-core has no plugin tab, so the relay runs in the background: closing the desktop app or a terminal leaves it connected. Check it with `peerband status` and stop it with `peerband relay --stop`. It does not start again by itself after you log out or restart the computer; run `peerband relay --core` again. The relay also serves the Herdr terminal app when it runs, and the Relay tab in Herdr serves herdr-core in the same way, so one relay covers both; `--core` is only needed without the Herdr terminal app. The relay connects to a herdr-core that is running (the desktop app starts one, and so do commands such as `hc run`) and never starts one itself.',
   options: [
     { name: 'core', type: 'boolean', description: 'Run the relay in the background for herdr-core and the Herdr desktop app.' },
     { name: 'stop', type: 'boolean', description: 'Stop the relay running on this machine (either kind).' },
@@ -33,9 +33,9 @@ export const spec: CommandSpec = {
     }
     const credentials = await requireCredentials(ctx);
     if (flag(parsed, 'core')) {
-      const state = await startBackgroundRelay(ctx, 'herdr-core');
+      const state = await startBackgroundRelay(ctx);
       ctx.out.print(state === 'running'
-        ? `${s.green(symbols.ok)} The PeerBand Relay for herdr-core is already running.`
+        ? `${s.green(symbols.ok)} A PeerBand Relay that serves herdr-core is already running.`
         : `${s.green(symbols.ok)} PeerBand Relay is running in the background for herdr-core.`);
       ctx.out.print(s.dim('Check it with `peerband status`; stop it with `peerband relay --stop`.'));
       printMcpHint(ctx, credentials.serverUrl);

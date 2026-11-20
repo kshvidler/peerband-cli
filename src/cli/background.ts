@@ -7,13 +7,16 @@ import { execProgram } from './exec.js';
 import { ownerRecordPath } from './herdr-js.js';
 import { sanitize } from './output.js';
 import { CliError, type Ctx } from './types.js';
+import { loadMachineConnectorConfig } from './commands/shared.js';
 
 /**
  * herdr-core has no plugin system, so its relay runs as the same detached supervisor the Herdr plugin uses
  * (herdr/lifecycle.mjs), outside any terminal: closing the Herdr desktop app or a terminal leaves it running,
  * and `peerband status`, `peerband notify` and `peerband relay --stop` reach it over the usual control channel.
+ * It runs the `auto` runtime, like the Relay tab: herdr-core whenever a core runs, and the Herdr terminal app
+ * whenever that runs, so one relay serves both whichever of them started it.
  */
-export type BackgroundRuntime = 'herdr-core';
+export type BackgroundRuntime = 'auto';
 
 /** The runtime a relay's owner record names (`herdr` when the record predates the field or is unreadable). */
 export async function recordedRelayRuntime(env: NodeJS.ProcessEnv): Promise<string> {
@@ -39,13 +42,23 @@ function lifecycleScript(ctx: Ctx): string {
 }
 
 /** `checked`: the caller already found hc, so the probe is skipped. */
-export async function startBackgroundRelay(ctx: Ctx, runtime: BackgroundRuntime, options: { checked?: boolean } = {}): Promise<'started' | 'running'> {
+export async function startBackgroundRelay(ctx: Ctx, runtime: BackgroundRuntime = 'auto', options: { checked?: boolean } = {}): Promise<'started' | 'running'> {
   const current = await runningRelayRuntime(ctx.env);
-  if (current === runtime) return 'running';
+  // A relay that already serves herdr-core: this one (auto), an older background relay (herdr-core), or the
+  // Relay tab in Herdr, which runs auto unless connector.json limits it to the Herdr app.
+  if (current === runtime || current === 'herdr-core') return 'running';
+  if (current === 'herdr') {
+    const configured = (await loadMachineConnectorConfig(ctx).catch(() => undefined))?.runtime;
+    if (configured === undefined || configured === 'auto') return 'running';
+  }
   if (current !== undefined) {
     throw new CliError(
-      `A PeerBand relay for ${current === 'herdr' ? 'the Herdr terminal app' : current} is already running on this machine. One relay serves one runtime.`,
-      'Stop it with `peerband relay --stop` (or close the Relay tab in Herdr), then run `peerband relay --core` again.',
+      current === 'herdr'
+        ? 'The PeerBand relay running in Herdr serves only the Herdr terminal app: connector.json sets "runtime": "herdr".'
+        : `A PeerBand relay for ${current} is already running on this machine, and a machine has one relay.`,
+      current === 'herdr'
+        ? 'Remove that setting (the default serves Herdr and herdr-core together), then restart the relay with `peerband relay --stop` and `peerband relay`.'
+        : 'Stop it with `peerband relay --stop`, then run `peerband relay --core` again.',
     );
   }
   const exec = ctx.exec ?? execProgram;

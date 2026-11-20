@@ -169,11 +169,20 @@ describe('HerdrCoreAdapter', () => {
     const output = await adapter.readOutput(agent!.id, { lines: 3 });
     expect(output).toMatchObject({ untrusted: true, truncated: true });
     expect(output.text).toBe('line 2\nkey: token=[REDACTED]\nlast');
-    expect(core.calls.find((call) => call.method === 'terminal.read')?.params).toEqual({ terminal: 't1', lines: 3 });
+    // It reads deeper than asked, so screen padding can be folded away before the last lines are taken.
+    expect(core.calls.find((call) => call.method === 'terminal.read')?.params).toEqual({ terminal: 't1', lines: 123 });
     core.terminals[0]!.read = { how: 'screen', why: 'working', complete: false };
     expect(await adapter.readOutput(agent!.id, {})).toMatchObject({ source: 'visible', truncated: true });
     await expect(adapter.readOutput(agent!.id, { cursor: 'x' })).rejects.toMatchObject({ code: 'unsupported_capability' });
     await expect(adapter.readOutput(agent!.id, { lines: 501 })).rejects.toMatchObject({ code: 'invalid_argument' });
+  });
+
+  it('folds the blank rows of a tall screen, so the last lines hold the reply and not padding', async () => {
+    const padding = '\n'.repeat(90);
+    const { adapter } = setup([claude({ text: `> Run the tests\n\n● All 12 tests pass\n${padding}────\n❯ \n────\n  footer\n${'\n'.repeat(5)}` })]);
+    const [agent] = await adapter.listAgents();
+    const output = await adapter.readOutput(agent!.id, { lines: 8 });
+    expect(output.text).toBe('> Run the tests\n\n● All 12 tests pass\n\n────\n❯\n────\n  footer');
   });
 
   it('pushes status changes from the event stream without reading output', async () => {
@@ -227,6 +236,20 @@ describe('HerdrCoreAdapter', () => {
     await until(() => events.some((event) => event.kind === 'status'));
     expect(events.find((event) => event.kind === 'status')).toMatchObject({ agentId: agent!.id, status: 'done', previousStatus: 'idle', revision: null });
     expect(logs).toContain('herdr-core event stream closed; reconnecting.');
+  });
+
+  it('says the list changed when the core goes away, and logs a missing core only once', async () => {
+    const { core, adapter } = setup([claude()]);
+    const events: RuntimeEvent[] = [];
+    const logs: string[] = [];
+    adapter.onEvent((event) => events.push(event), (message) => logs.push(message));
+    await until(() => core.subscribers.size === 1);
+    core.overrides.set('events.subscribe', () => { throw { kind: 'unavailable', message: 'no core' }; });
+    core.dropSubscribers();
+    await until(() => events.some((event) => event.kind === 'agents_changed'));
+    // Several failed retries later, still one notice.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(logs.filter((line) => line.includes('reconnecting'))).toHaveLength(1);
   });
 
   it('maps HC_TERMINAL_ID to its agent for notes', async () => {

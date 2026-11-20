@@ -91,7 +91,7 @@ export const spec: CommandSpec = {
     } else if (herdr === 'no-herdr' && await coreInstalled(ctx)) {
       // No Herdr terminal app, but herdr-core (and so maybe the Herdr desktop app) is here: its relay runs in the background.
       try {
-        await startBackgroundRelay(ctx, 'herdr-core', { checked: true });
+        await startBackgroundRelay(ctx, 'auto', { checked: true });
         relayOpen = true;
         ctx.out.print(`${s.green(symbols.ok)} PeerBand Relay is running in the background for herdr-core ${s.dim('(stop it with `peerband relay --stop`)')}.`);
       } catch (error) {

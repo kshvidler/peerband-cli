@@ -171,7 +171,7 @@ describe('peerband setup', () => {
     const out = plain(r.stdout);
     expect(r.code).toBe(0);
     expect(calls[0]).toEqual(['/opt/hc', '--version']);
-    expect(calls[1]).toEqual([process.execPath, resolve(dirname(SELF), '..', 'herdr', 'lifecycle.mjs'), 'start', 'PEERBAND_RUNTIME=herdr-core']);
+    expect(calls[1]).toEqual([process.execPath, resolve(dirname(SELF), '..', 'herdr', 'lifecycle.mjs'), 'start', 'PEERBAND_RUNTIME=auto']);
     expect(out).toContain('PeerBand Relay is running in the background for herdr-core');
     expect(out).toContain('PeerBand is set up.');
     expect(opened).toBe(false);

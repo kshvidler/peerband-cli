@@ -21,7 +21,7 @@ export interface StatusReport {
   mcpUrl: string | null;
   installationId: string | null;
   enrolledAt: string | null;
-  /** `runtime`: what the running relay serves (herdr, herdr-core or mock); null when no relay is running. */
+  /** `runtime`: how the running relay was started: herdr (the Relay tab), auto (in the background), herdr-core (older background relays) or mock; null when no relay is running. */
   relay: { running: boolean; connection: string | null; source: 'control' | 'file' | 'none'; runtime: string | null };
   /** Whether MCP clients may send messages to agents from this machine; null if connector.json is unreadable. */
   messages: 'allowed' | 'read-only' | null;
@@ -110,7 +110,7 @@ function renderHuman(report: StatusReport, ctx: Ctx): void {
     if (report.enrolledAt) rows.push(['Enrolled', report.enrolledAt]);
   }
   const relayLine = report.relay.running
-    ? `${colorConnection(s, report.relay.connection)}${report.relay.runtime === 'herdr-core' ? s.dim(' (herdr-core, in the background; stop with `peerband relay --stop`)') : ''}`
+    ? `${colorConnection(s, report.relay.connection)}${report.relay.runtime === 'herdr-core' || report.relay.runtime === 'auto' ? s.dim(' (in the background, for herdr-core; stop with `peerband relay --stop`)') : ''}`
     : report.relay.source === 'file' && report.relay.connection && report.relay.connection !== 'helper-unavailable'
       ? `${colorConnection(s, report.relay.connection)} ${s.dim('(last known; relay not running)')}`
       : s.dim(`${symbols.ring} not running ${s.dim('(open it with `peerband relay`, or `peerband relay --core` for herdr-core)')}`);

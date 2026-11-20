@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { ConnectError, sanitizeOutput, type AgentRecord, type AgentStatus, type Capabilities, type OutputOptions, type OutputResult, type RuntimeAdapter, type RuntimeEvent, type RuntimeEventListener } from '../core/index.js';
 import type { EnvironmentResult } from '../core/environment.js';
 import { BACKGROUND_SPACE_ID, BACKGROUND_SPACE_LABEL, BACKGROUND_TAB_ID, BACKGROUND_TAB_LABEL, cleanLabel, emptyLayout, LAYOUT_DOC, parseLayout, type CoreLayout } from './layout.js';
-import { CoreConnection, CoreRpcClient, CoreRpcError, resolveCoreBinary, spawnCoreStream, type CoreNotification, type CoreStreamFactory } from './rpc.js';
+import { attachOnlyStream, CoreConnection, CoreRpcClient, CoreRpcError, resolveCoreBinary, spawnCoreStream, type CoreNotification, type CoreStreamFactory } from './rpc.js';
 
 export interface HerdrCoreAdapterOptions {
   /** The `hc` binary. Default: $HC_BIN, `hc` on PATH, then the installer's location. */
@@ -11,6 +11,8 @@ export interface HerdrCoreAdapterOptions {
   timeoutMs?: number;
   /** Test seam: how to open a protocol stream (default: spawn `hc connect`). */
   streamFactory?: CoreStreamFactory;
+  /** Only use a core that is already running, never start one (the combined Herdr + herdr-core relay). */
+  attachOnly?: boolean;
   /** Test seams for the event stream. */
   sleep?: (ms: number) => Promise<void>;
   settleMs?: number;
@@ -40,6 +42,13 @@ const REQUIRED_METHODS = ['terminal.list', 'terminal.get', 'terminal.read', 'ter
 const LIST_EVENTS = new Set(['created', 'lost', 'restarted', 'finished', 'removed']);
 /** Message delivery waits for a person's unsent draft for up to 60 s (core's draft_wait), so allow longer. */
 const SEND_TIMEOUT_MS = 90_000;
+/** Rows read beyond the requested lines, so screen padding can be folded away (core's default height). */
+const READ_SLACK_LINES = 120;
+
+/** Drops trailing spaces and trailing blank rows, and turns each run of blank rows into one blank line. */
+export function foldBlankRows(text: string): string {
+  return text.replace(/[ \t]+(?=\r?\n|$)/g, '').replace(/(?:\r?\n){3,}/g, '\n\n').replace(/(?:\r?\n)+$/, '');
+}
 /** Agent names core reports in OSC 7501 `app`, mapped to the kinds PeerBand uses elsewhere. */
 const APP_KINDS: Record<string, string> = { 'claude-code': 'claude', 'cursor-agent': 'cursor', 'github-copilot': 'copilot', 'grok-build': 'grok' };
 
@@ -75,7 +84,8 @@ export class HerdrCoreAdapter implements RuntimeAdapter {
   private methods = new Set<string>();
 
   constructor(private readonly options: HerdrCoreAdapterOptions = {}) {
-    this.factory = options.streamFactory ?? spawnCoreStream(resolveCoreBinary(options.binary));
+    const binary = resolveCoreBinary(options.binary);
+    this.factory = options.streamFactory ?? (options.attachOnly ? attachOnlyStream(binary) : spawnCoreStream(binary));
     this.timeoutMs = options.timeoutMs ?? 10_000;
     this.client = new CoreRpcClient(this.factory, this.timeoutMs);
     this.machineId = options.machineId ?? createHash('sha256').update(`${process.platform}:${process.env.COMPUTERNAME ?? process.env.HOSTNAME ?? 'local'}`).digest('hex').slice(0, 24);
@@ -177,10 +187,12 @@ export class HerdrCoreAdapter implements RuntimeAdapter {
 
   private async read(address: string, options: OutputOptions): Promise<OutputResult> {
     const lines = clampInteger(options.lines, 80, 1, 500);
-    const result = await this.call('terminal.read', { terminal: address, lines }) as { text?: unknown; complete?: unknown; how?: unknown; why?: unknown } | null;
+    // A terminal no window shows keeps core's default size (120 rows), so a full-screen agent draws its reply
+    // near the top, then blank rows, then its input box. Read deeper and fold the blank runs, so the last
+    // `lines` lines hold the reply rather than padding.
+    const result = await this.call('terminal.read', { terminal: address, lines: Math.min(500, lines + READ_SLACK_LINES) }) as { text?: unknown; complete?: unknown; how?: unknown; why?: unknown } | null;
     if (!result || typeof result.text !== 'string') throw schemaMismatch('terminal.read returned no text');
-    // The screen is padded to its full height; trailing blank rows are not output.
-    const text = result.text.replace(/(?:[ \t]*\r?\n)+[ \t]*$/, '');
+    const text = foldBlankRows(result.text);
     const output = sanitizeOutput(text, { ...options, lines, bytes: clampInteger(options.bytes, 16_384, 1, 32_768) });
     // While an agent works or waits, core returns only its screen instead of scrolling a full-screen app.
     const visibleOnly = result.how === 'screen' && typeof result.why === 'string';
@@ -291,6 +303,7 @@ export class HerdrCoreAdapter implements RuntimeAdapter {
   private async watch(log: (message: string) => void): Promise<void> {
     let delay = 1_000;
     let announced = false;
+    let connected = false;
     while (!this.stopped) {
       const connection = new CoreConnection(this.factory(), (message) => this.onNotification(message));
       this.stream = connection;
@@ -298,6 +311,7 @@ export class HerdrCoreAdapter implements RuntimeAdapter {
       try {
         await connection.request('events.subscribe', {}, this.timeoutMs);
         if (!announced) { log('Watching herdr-core for agent status changes.'); announced = true; }
+        connected = true;
         // The snapshot may already differ from the last list (a reconnect): reconcile through one refresh.
         this.scheduleRefresh(0);
         await connection.done;
@@ -307,7 +321,13 @@ export class HerdrCoreAdapter implements RuntimeAdapter {
       }
       if (this.stopped) break;
       if (Date.now() - startedAt > 60_000) delay = 1_000;
-      log('herdr-core event stream closed; reconnecting.');
+      // Say so once per lost stream, not on every retry while no core runs.
+      if (connected) {
+        log('herdr-core event stream closed; reconnecting.');
+        // Its agents are gone from the list until the core is back.
+        this.emit({ kind: 'agents_changed' });
+      }
+      connected = false;
       await this.sleep(delay);
       delay = Math.min(delay * 2, 30_000);
     }
