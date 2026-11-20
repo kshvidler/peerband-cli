@@ -36,7 +36,9 @@ export function failureDetail(result: HerdrResult): string {
     const parsed = JSON.parse(text) as { error?: { message?: string }; message?: string };
     detail = parsed.error?.message || parsed.message || text;
   } catch {
-    /* plain text */
+    // Plain text. `herdr plugin install` prints a long preview before its error, so lead with the error line.
+    const errorLine = text.split(/\r?\n/).reverse().find((line) => /^\s*error\b/i.test(line));
+    if (errorLine) detail = errorLine.trim();
   }
   return detail.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '').replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').trim().slice(0, 400);
 }

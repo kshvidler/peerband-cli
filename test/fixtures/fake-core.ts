@@ -99,7 +99,7 @@ export class FakeCore {
     const override = this.overrides.get(method);
     if (override) return override(params);
     switch (method) {
-      case 'hello': return { generation: this.generation, version: '0.1.21', framed: false, core: { id: this.coreId, name: 'fake' }, features: ['events', 'status'], methods: ['hello', 'server.status', 'terminal.list', 'terminal.get', 'terminal.read', 'terminal.send', 'events.subscribe', 'doc.get'] };
+      case 'hello': return { generation: this.generation, version: '0.1.21', framed: false, core: { id: this.coreId, name: 'fake' }, features: ['events', 'status'], methods: ['hello', 'server.status', 'terminal.list', 'terminal.get', 'terminal.read', 'terminal.send', 'terminal.keys', 'events.subscribe', 'doc.get'] };
       case 'server.status': return { core: { id: this.coreId, name: 'fake' }, version: '0.1.21' };
       case 'terminal.list': return { terminals: this.terminals.filter((t) => (t.state ?? 'live') === 'live').map(record), hidden_finished: 0, machines: [] };
       case 'terminal.get': return record(this.find(params.terminal));
@@ -113,6 +113,7 @@ export class FakeCore {
         terminal.text = `${terminal.text ?? ''}\n${String(params.text)}`;
         return { started: true, status: terminal.status?.state ?? null, turn: 1 };
       }
+      case 'terminal.keys': return { status: this.find(params.terminal).status?.state ?? null, turn: 1 };
       case 'doc.get': return params.name === 'herdr-app' && this.layout !== null ? { value: this.layout, version: 3 } : { value: null, version: 0 };
       case 'events.subscribe': return { channel: null, seq: this.seq, terminals: this.terminals.map(record) };
       default: throw { kind: 'invalid_params', message: `unknown method ${method}` };
