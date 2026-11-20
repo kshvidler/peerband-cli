@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { saveCredentials } from '../src/core/index.js';
 import { SKILLS_CLI } from '../src/cli/skill.js';
@@ -150,10 +150,30 @@ describe('peerband setup', () => {
     const r = await runCli(['setup'], { env: envOf(e), overrides: { exec: cli.exec, selfPath: SELF, openRelayTab: async () => ((opened = true), 'p') } });
     const out = plain(r.stdout);
     expect(r.code).toBe(0);
-    expect(cli.calls).toEqual([]);
+    // The only program setup runs is the herdr-core probe, which finds nothing here.
+    expect(cli.calls.map((call) => call.slice(1))).toEqual([['--version']]);
     expect(out).toContain('Next: peerband skill');
     expect(out).toContain('Herdr was not found');
     expect(out).toContain('Not opened: Herdr is not installed');
+    expect(opened).toBe(false);
+  });
+
+  it('starts the relay for herdr-core in the background when only herdr-core is installed', async () => {
+    const e = await dirs();
+    await loggedIn(e);
+    const calls: string[][] = [];
+    const exec: ExecRunner = async (file, args, options) => {
+      calls.push([file, ...args, ...(options?.env?.PEERBAND_RUNTIME ? [`PEERBAND_RUNTIME=${options.env.PEERBAND_RUNTIME}`] : [])]);
+      return { code: 0, stdout: args[0] === '--version' ? 'hc 0.1.21\n' : '{"state":"running"}\n', stderr: '' };
+    };
+    let opened = false;
+    const r = await runCli(['setup', '--skill', 'skip'], { env: { ...envOf(e), HC_BIN: '/opt/hc' }, overrides: { exec, selfPath: SELF, openRelayTab: async () => ((opened = true), 'p') } });
+    const out = plain(r.stdout);
+    expect(r.code).toBe(0);
+    expect(calls[0]).toEqual(['/opt/hc', '--version']);
+    expect(calls[1]).toEqual([process.execPath, resolve(dirname(SELF), '..', 'herdr', 'lifecycle.mjs'), 'start', 'PEERBAND_RUNTIME=herdr-core']);
+    expect(out).toContain('PeerBand Relay is running in the background for herdr-core');
+    expect(out).toContain('PeerBand is set up.');
     expect(opened).toBe(false);
   });
 

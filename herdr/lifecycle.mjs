@@ -15,6 +15,8 @@ const pluginRoot = resolve(dirname(script), "..");
 // PEERBAND_CONNECTOR_ENTRY is for tests only: it replaces the bundled CLI as the connector child.
 const connectorEntry = process.env.PEERBAND_CONNECTOR_ENTRY || join(pluginRoot, "dist", "peerband.mjs");
 const paneStatePath = relayStatePath(config);
+// Runtimes the supervisor passes on to the connector child.
+const RUNTIMES = ["mock", "herdr-core"];
 
 // Starting Node can take several seconds on a loaded machine (5-8 s has been seen on Windows), so waits are
 // deadlines measured in time, not a fixed number of quick retries.
@@ -87,8 +89,10 @@ async function supervise() {
   const token = randomBytes(32).toString("hex");
   // Messaging is on by default; "enableWrites": false in connector.json (read by the connector itself) turns it off.
   const childArgs = [connectorEntry, "connect", "--managed"];
-  if (process.env.PEERBAND_RUNTIME === "mock")
-    childArgs.push("--runtime", "mock");
+  // The Herdr plugin leaves PEERBAND_RUNTIME unset (the connector then serves Herdr); `peerband relay --core` sets herdr-core.
+  const runtime = RUNTIMES.includes(process.env.PEERBAND_RUNTIME) ? process.env.PEERBAND_RUNTIME : undefined;
+  if (runtime)
+    childArgs.push("--runtime", runtime);
   if (process.env.PEERBAND_CONNECTOR_CONFIG)
     childArgs.push("--config", process.env.PEERBAND_CONNECTOR_CONFIG);
   let child = null;
@@ -172,6 +176,8 @@ async function supervise() {
   function forwardNote(input, reply) {
     const text = input.text;
     const paneId = input.paneId;
+    // herdr-core's terminal address ($HC_TERMINAL_ID), sent beside a Herdr pane id that a core terminal may have inherited.
+    const terminalId = typeof input.terminalId === "string" && input.terminalId.length <= 128 ? input.terminalId : undefined;
     const channel = input.channel;
     const explicit = input.command === "notify-agent";
     const agentId = input.agentId;
@@ -200,7 +206,7 @@ async function supervise() {
     }, 5000);
     timer.unref();
     pendingNotes.set(id, { reply, timer });
-    current.send({ type: explicit ? "peerband:notify-agent" : "peerband:notify", id, text, ...(explicit ? { agentId } : {}), ...(paneId ? { paneId } : {}), ...(channel ? { channel } : {}) }, (error) => {
+    current.send({ type: explicit ? "peerband:notify-agent" : "peerband:notify", id, text, ...(explicit ? { agentId } : {}), ...(paneId ? { paneId } : {}), ...(terminalId ? { terminalId } : {}), ...(channel ? { channel } : {}) }, (error) => {
       if (!error || !pendingNotes.delete(id)) return;
       clearTimeout(timer);
       reply({ error: "not-running", message: "The connector is not reachable." }, true);
@@ -298,7 +304,7 @@ async function supervise() {
     server.once("error", reject);
     server.listen(channel, resolve);
   });
-  await writeFile(recordPath, JSON.stringify({ token, ...ownerIdentity() }), {
+  await writeFile(recordPath, JSON.stringify({ token, ...ownerIdentity(), ...(runtime ? { runtime } : {}) }), {
     mode: 0o600,
     flag: "wx",
   });

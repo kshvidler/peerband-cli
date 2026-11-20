@@ -2,6 +2,7 @@ import { configHome, loadCredentials, mcpUrlFor, type Credentials } from '../../
 import { checkHerdrPlugin, fixCommand, REPAIR_COMMAND, type PluginProblem } from './herdr-check.js';
 import { paneLabel } from '../herdr-js.js';
 import { flag } from '../args.js';
+import { recordedRelayRuntime } from '../background.js';
 import { relaySnapshot, type RelaySnapshot } from '../control.js';
 import { symbols, type Style } from '../output.js';
 import { EXIT_NOT_LOGGED_IN, type CommandSpec, type Ctx } from '../types.js';
@@ -20,7 +21,8 @@ export interface StatusReport {
   mcpUrl: string | null;
   installationId: string | null;
   enrolledAt: string | null;
-  relay: { running: boolean; connection: string | null; source: 'control' | 'file' | 'none' };
+  /** `runtime`: what the running relay serves (herdr, herdr-core or mock); null when no relay is running. */
+  relay: { running: boolean; connection: string | null; source: 'control' | 'file' | 'none'; runtime: string | null };
   /** Whether MCP clients may send messages to agents from this machine; null if connector.json is unreadable. */
   messages: 'allowed' | 'read-only' | null;
   herdr: {
@@ -48,6 +50,7 @@ export async function buildStatus(ctx: Ctx): Promise<StatusReport> {
     credentials = undefined;
   }
   const snapshot: RelaySnapshot | undefined = await relaySnapshot(ctx.env);
+  const running = snapshot?.source === 'control' && snapshot.state === 'running';
   const plugin = await checkHerdrPlugin(ctx);
   const messages = await loadMachineConnectorConfig(ctx).then(
     (config) => (writesEnabled(config) ? ('allowed' as const) : ('read-only' as const)),
@@ -65,9 +68,10 @@ export async function buildStatus(ctx: Ctx): Promise<StatusReport> {
     installationId: credentials?.installationId ?? null,
     enrolledAt: credentials?.enrolledAt ?? null,
     relay: {
-      running: snapshot?.source === 'control' && snapshot.state === 'running',
+      running,
       connection: snapshot?.connectionState ?? null,
       source: snapshot?.source ?? 'none',
+      runtime: running ? await recordedRelayRuntime(ctx.env) : null,
     },
     messages,
     herdr: {
@@ -106,10 +110,10 @@ function renderHuman(report: StatusReport, ctx: Ctx): void {
     if (report.enrolledAt) rows.push(['Enrolled', report.enrolledAt]);
   }
   const relayLine = report.relay.running
-    ? colorConnection(s, report.relay.connection)
+    ? `${colorConnection(s, report.relay.connection)}${report.relay.runtime === 'herdr-core' ? s.dim(' (herdr-core, in the background; stop with `peerband relay --stop`)') : ''}`
     : report.relay.source === 'file' && report.relay.connection && report.relay.connection !== 'helper-unavailable'
       ? `${colorConnection(s, report.relay.connection)} ${s.dim('(last known; relay not running)')}`
-      : s.dim(`${symbols.ring} not running ${s.dim('(open it with `peerband relay`)')}`);
+      : s.dim(`${symbols.ring} not running ${s.dim('(open it with `peerband relay`, or `peerband relay --core` for herdr-core)')}`);
   rows.push(['Relay', relayLine]);
   if (report.messages) {
     rows.push([

@@ -43,6 +43,18 @@ async function fakeHelper(reply: ((request: Record<string, unknown>, socket: Soc
 }
 
 describe('peerband notify', () => {
+  it('sends the herdr-core terminal id, separately when a Herdr pane id was inherited', async () => {
+    const helper = await fakeHelper({ ok: true, sent: true, agentId: 'hc_abc', eventId: '7b0e7c1e-6f7e-4a59-9d55-2f8f3a3c1d11' });
+    try {
+      expect((await runCli(['notify', 'From core'], { env: { PEERBAND_CONFIG_HOME: helper.home, HC_TERMINAL_ID: 't4' } })).code).toBe(0);
+      expect(helper.received[0]).toEqual({ token: 'secret-token', command: 'notify', text: 'From core', paneId: 't4' });
+      expect((await runCli(['notify', 'Both'], { env: { PEERBAND_CONFIG_HOME: helper.home, HERDR_PANE_ID: 'w1:p2', HC_TERMINAL_ID: 't4' } })).code).toBe(0);
+      expect(helper.received[1]).toEqual({ token: 'secret-token', command: 'notify', text: 'Both', paneId: 'w1:p2', terminalId: 't4' });
+    } finally {
+      await helper.close();
+    }
+  });
+
   it('sends the note and the calling Herdr pane over the control channel', async () => {
     const helper = await fakeHelper({ ok: true, sent: true, agentId: 'herdr_abc', eventId: '7b0e7c1e-6f7e-4a59-9d55-2f8f3a3c1d11' });
     try {

@@ -9,11 +9,24 @@ export interface HerdrConnectorSettings {
   timeoutMs?: number;
 }
 
+/** herdr-core (`hc`), the terminal server behind the Herdr desktop app. */
+export interface HerdrCoreConnectorSettings {
+  binary?: string;
+  machineId?: string;
+  timeoutMs?: number;
+}
+
+export const RUNTIMES = ['herdr', 'herdr-core'] as const;
+export type RuntimeName = typeof RUNTIMES[number];
+
 export interface ConnectorConfig {
+  /** Which runtime the connector serves: the Herdr TUI (default) or herdr-core. */
+  runtime?: RuntimeName;
   allowedAgents?: string[];
   allowedWorkspaces?: string[];
   stateDirectory?: string;
   herdr?: HerdrConnectorSettings;
+  herdrCore?: HerdrCoreConnectorSettings;
   enableWrites?: boolean;
   enableEnvironmentControl?: boolean;
 }
@@ -44,8 +57,12 @@ function stringList(record: Record<string, unknown>, key: string, where: string)
 /** Validates a parsed connector.json value. Throws ConfigError on any problem. */
 export function parseConnectorConfig(value: unknown, source = 'connector config'): ConnectorConfig {
   if (!isRecord(value)) throw new ConfigError(`${source}: expected a JSON object.`);
-  rejectUnknown(value, ['allowedAgents', 'allowedWorkspaces', 'stateDirectory', 'herdr', 'enableWrites', 'enableEnvironmentControl'], source);
+  rejectUnknown(value, ['runtime', 'allowedAgents', 'allowedWorkspaces', 'stateDirectory', 'herdr', 'herdrCore', 'enableWrites', 'enableEnvironmentControl'], source);
   const config: ConnectorConfig = {};
+  if (value.runtime !== undefined) {
+    if (typeof value.runtime !== 'string' || !(RUNTIMES as readonly string[]).includes(value.runtime)) throw new ConfigError(`${source}.runtime must be one of: ${RUNTIMES.join(', ')}.`);
+    config.runtime = value.runtime as RuntimeName;
+  }
   const agents = stringList(value, 'allowedAgents', source);
   if (agents) config.allowedAgents = agents;
   const workspaces = stringList(value, 'allowedWorkspaces', source);
@@ -76,6 +93,23 @@ export function parseConnectorConfig(value: unknown, source = 'connector config'
       herdr.timeoutMs = raw.timeoutMs;
     }
     config.herdr = herdr;
+  }
+  if (value.herdrCore !== undefined) {
+    const raw = value.herdrCore;
+    if (!isRecord(raw)) throw new ConfigError(`${source}.herdrCore must be an object.`);
+    rejectUnknown(raw, ['binary', 'machineId', 'timeoutMs'], `${source}.herdrCore`);
+    const core: HerdrCoreConnectorSettings = {};
+    for (const key of ['binary', 'machineId'] as const) {
+      const text = stringField(raw, key, `${source}.herdrCore`, 4_000);
+      if (text) core[key] = text;
+    }
+    if (raw.timeoutMs !== undefined) {
+      if (typeof raw.timeoutMs !== 'number' || !Number.isInteger(raw.timeoutMs) || raw.timeoutMs < 100 || raw.timeoutMs > 120_000) {
+        throw new ConfigError(`${source}.herdrCore.timeoutMs must be an integer from 100 to 120000.`);
+      }
+      core.timeoutMs = raw.timeoutMs;
+    }
+    config.herdrCore = core;
   }
   return config;
 }

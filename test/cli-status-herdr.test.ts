@@ -27,7 +27,7 @@ describe('peerband status', () => {
       email: null,
       server: null,
       mcpUrl: null,
-      relay: { running: false, connection: null, source: 'none' },
+      relay: { running: false, connection: null, source: 'none', runtime: null },
       messages: 'allowed',
       herdr: { found: false, version: null, pluginInstalled: null, pluginSource: null, pluginProblems: [] },
       configHome: home,
