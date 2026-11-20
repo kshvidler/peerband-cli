@@ -1,9 +1,9 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
-import type { Readable, Writable } from 'node:stream';
+import { PassThrough, type Readable, type Writable } from 'node:stream';
 import { ConnectError } from '../core/index.js';
 
 /**
@@ -73,14 +73,16 @@ export class CoreConnection {
     this.done = stream.closed.then((error) => {
       this.open = false;
       lines.close();
-      const reason = error && (error as NodeJS.ErrnoException).code === 'ENOENT'
+      // A ConnectError means the stream never reached a core (attachOnlyStream), so nothing was delivered either.
+      const never = error instanceof ConnectError;
+      const reason = never ? error : error && (error as NodeJS.ErrnoException).code === 'ENOENT'
         ? new ConnectError('runtime_unavailable', 'herdr-core (hc) was not found.', 'Install herdr-core (https://github.com/herdrdev/herdr-core) or set herdrCore.binary in connector.json.')
         : new ConnectError('runtime_unavailable', 'The herdr-core connection closed.', 'Check that herdr-core is running (`hc server status`), then retry.');
       this.closeReason = reason;
       for (const [id, request] of this.pending) {
         clearTimeout(request.timer);
         this.pending.delete(id);
-        request.reject(request.method === 'terminal.send'
+        request.reject(request.method === 'terminal.send' && !never
           ? new ConnectError('delivery_unknown', 'herdr-core closed before confirming the message.', 'Read the agent output before deciding whether to send it again.')
           : reason);
       }
@@ -160,4 +162,61 @@ export class CoreRpcClient {
     this.connection = undefined;
     if (connection?.isOpen) { connection.close(); await connection.done; }
   }
+}
+
+/** The `hc` binary when one is installed (explicit setting, $HC_BIN, PATH or the installer's location), else undefined. */
+export function findCoreBinary(explicit?: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
+  if (explicit) return explicit;
+  if (env.HC_BIN) return env.HC_BIN;
+  const binary = resolveCoreBinary(undefined, env);
+  if (binary !== 'hc') return binary;
+  const onPath = (env.PATH ?? env.Path ?? '').split(process.platform === 'win32' ? ';' : ':').some((dir) => dir && (existsSync(join(dir, 'hc')) || existsSync(join(dir, 'hc.exe'))));
+  return onPath ? 'hc' : undefined;
+}
+
+/** True when a core is already running. `hc server status` only asks; unlike `hc connect` it never starts one. */
+export function coreRunning(binary: string, timeoutMs = 5_000): Promise<boolean> {
+  return new Promise((resolve) => {
+    execFile(binary, ['server', 'status', '--json'], { timeout: timeoutMs, windowsHide: true, maxBuffer: 1024 * 1024 }, (error, stdout) => {
+      if (error) return resolve(false);
+      try {
+        const status = JSON.parse(String(stdout)) as { error?: unknown; core?: unknown };
+        resolve(!status.error && typeof status.core === 'object' && status.core !== null);
+      } catch {
+        resolve(false);
+      }
+    });
+  });
+}
+
+/**
+ * Like spawnCoreStream, but only connects to a core that is already running: `hc connect` would start one, and a
+ * relay that serves Herdr as well must not start herdr-core on every machine that merely has it installed.
+ * Without a running core the stream closes at once with runtime_unavailable.
+ */
+export function attachOnlyStream(binary: string, running: (binary: string) => Promise<boolean> = coreRunning, spawnStream: CoreStreamFactory = spawnCoreStream(binary)): CoreStreamFactory {
+  return () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    let inner: CoreStream | undefined;
+    let done = false;
+    let finish!: (error: Error | undefined) => void;
+    const closed = new Promise<Error | undefined>((resolve) => {
+      finish = (error) => {
+        if (done) return;
+        done = true;
+        output.end();
+        resolve(error);
+      };
+    });
+    void running(binary).then((up) => {
+      if (done) return;
+      if (!up) return finish(new ConnectError('runtime_unavailable', 'herdr-core is not running.', 'Open the Herdr desktop app or run `hc server start`.'));
+      inner = spawnStream();
+      input.pipe(inner.input);
+      inner.output.on('data', (chunk: Buffer) => output.write(chunk));
+      void inner.closed.then(finish);
+    }, () => finish(new ConnectError('runtime_unavailable', 'herdr-core is not running.', 'Open the Herdr desktop app or run `hc server start`.')));
+    return { input, output, closed, close: () => { if (inner) inner.close(); else finish(undefined); } };
+  };
 }

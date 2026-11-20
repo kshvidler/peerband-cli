@@ -16,7 +16,7 @@ const pluginRoot = resolve(dirname(script), "..");
 const connectorEntry = process.env.PEERBAND_CONNECTOR_ENTRY || join(pluginRoot, "dist", "peerband.mjs");
 const paneStatePath = relayStatePath(config);
 // Runtimes the supervisor passes on to the connector child.
-const RUNTIMES = ["mock", "herdr-core"];
+const RUNTIMES = ["mock", "auto", "herdr-core"];
 
 // Starting Node can take several seconds on a loaded machine (5-8 s has been seen on Windows), so waits are
 // deadlines measured in time, not a fixed number of quick retries.

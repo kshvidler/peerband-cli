@@ -12,7 +12,8 @@ import {
   type RuntimeAdapter,
 } from '../../core/index.js';
 import { HerdrAdapter } from '../../runtime-herdr/index.js';
-import { HerdrCoreAdapter } from '../../runtime-herdr-core/index.js';
+import { findCoreBinary, HerdrCoreAdapter } from '../../runtime-herdr-core/index.js';
+import { CombinedAdapter } from '../../runtime-combined/index.js';
 import { flag, str } from '../args.js';
 import { sanitize, symbols, type Style } from '../output.js';
 import { CliError, type CommandSpec, type Ctx, UsageError } from '../types.js';
@@ -61,11 +62,11 @@ export function activityLine(s: Style, activity: Activity, at = new Date()): str
 export const spec: CommandSpec = {
   name: 'connect',
   summary: 'Run the connector in the foreground',
-  usage: 'peerband connect [--runtime herdr|herdr-core|mock] [--read-only] [--config PATH] [--server URL]',
+  usage: 'peerband connect [--runtime auto|herdr|herdr-core|mock] [--read-only] [--config PATH] [--server URL]',
   description:
     'Connects this machine to PeerBand and serves agent requests from your MCP clients until you press Ctrl+C. MCP clients may send messages to agents by default, but only after you approve the agents:message consent when you connect them; pass --read-only (or set "enableWrites": false in connector.json) to make this machine read-only. Activity lines show metadata only (tool, target, outcome, latency), never message or output content. Most people use `peerband relay` instead, which runs the connector inside Herdr, or `peerband relay --core` for herdr-core and the Herdr desktop app.',
   options: [
-    { name: 'runtime', type: 'string', valueName: 'herdr|herdr-core|mock', description: 'Agent runtime: "herdr" (the Herdr terminal app), "herdr-core" (hc, also behind the Herdr desktop app) or "mock" (fake agents for testing). Default: $PEERBAND_RUNTIME, then "runtime" in connector.json, then herdr.' },
+    { name: 'runtime', type: 'string', valueName: 'auto|herdr|herdr-core|mock', description: 'Agent runtime: "auto" (the Herdr terminal app, plus herdr-core whenever a core is running), "herdr" (the Herdr terminal app only), "herdr-core" (hc, also behind the Herdr desktop app, only) or "mock" (fake agents for testing). Default: $PEERBAND_RUNTIME, then "runtime" in connector.json, then auto.' },
     { name: 'disable-environment-control', type: 'boolean', description: 'Turn off the owner-only Herdr environment tools (open tabs and panes, start agents) on this machine (also: "enableEnvironmentControl": false in connector.json). They are on by default and still need the environment:control consent.' },
     { name: 'enable-environment-control', type: 'boolean', description: 'Redundant: environment controls are on by default. Kept so old scripts keep working.' },
     { name: 'read-only', type: 'boolean', description: 'Do not allow MCP clients to send messages to agents on this machine (also: "enableWrites": false in connector.json).' },
@@ -155,21 +156,29 @@ function isShutdownMessage(message: unknown): boolean {
 
 export async function connect(options: ConnectOptions, ctx: Ctx): Promise<number> {
   const requested = options.runtime ?? ctx.env.PEERBAND_RUNTIME;
-  if (requested !== undefined && requested !== 'herdr' && requested !== 'herdr-core' && requested !== 'mock') throw new UsageError(`Unknown runtime "${requested}".`, 'Use --runtime herdr, --runtime herdr-core or --runtime mock.');
+  if (requested !== undefined && requested !== 'auto' && requested !== 'herdr' && requested !== 'herdr-core' && requested !== 'mock') throw new UsageError(`Unknown runtime "${requested}".`, 'Use --runtime auto, herdr, herdr-core or mock.');
   const credentials = await requireCredentials(ctx);
   if (options.server) credentials.serverUrl = validateServerUrl(options.server);
   if (options.readOnly && options.enableWrites) throw new UsageError('--read-only and --enable-writes contradict each other.', 'Use --read-only to turn messaging off; messaging is on by default.');
   if (options.disableEnvironmentControl && options.enableEnvironmentControl) throw new UsageError('--disable-environment-control and --enable-environment-control contradict each other.', 'Use --disable-environment-control to turn environment controls off; they are on by default.');
   const config = await loadMachineConnectorConfig(ctx, options.config);
-  const runtime = requested ?? config.runtime ?? 'herdr';
+  const runtime = requested ?? config.runtime ?? 'auto';
   const enableWrites = writesEnabled(config, { readOnly: options.readOnly, enableWrites: options.enableWrites });
   const managed = Boolean(options.managed);
   const s = ctx.out.stderr;
   const machine = describeMachine(credentials);
 
+  const coreBinary = runtime === 'auto' ? findCoreBinary(config.herdrCore?.binary, ctx.env) : undefined;
   const adapter: RuntimeAdapter = runtime === 'mock' ? new MockRuntime()
     : runtime === 'herdr-core' ? new HerdrCoreAdapter(config.herdrCore ?? {})
+    // auto: the Herdr app, plus herdr-core when it is installed. The relay keeps one connection per machine, so
+    // one connector serves both. It attaches to a running core only and never starts one.
+    : coreBinary ? new CombinedAdapter([
+      { name: 'herdr', adapter: new HerdrAdapter(config.herdr ?? {}), ownsAgent: (id) => id.startsWith('herdr_') },
+      { name: 'herdr-core', adapter: new HerdrCoreAdapter({ ...config.herdrCore, binary: coreBinary, attachOnly: true }), ownsAgent: (id) => id.startsWith('hc_') },
+    ])
     : new HerdrAdapter(config.herdr ?? {});
+  const runtimeLabel = runtime === 'auto' ? (coreBinary ? 'Herdr and herdr-core' : 'herdr') : runtime;
   const core = new ConnectorCore(adapter, {
     writesEnabled: enableWrites,
     environmentControlEnabled: environmentControlEnabled(config, { disable: options.disableEnvironmentControl, enable: options.enableEnvironmentControl }),
@@ -239,7 +248,7 @@ export async function connect(options: ConnectOptions, ctx: Ctx): Promise<number
     events.start();
     if (!managed) {
       ctx.out.warn(
-        `${s.bold('peerband')} ${s.dim(`${runtime} runtime, ${enableWrites ? 'messages allowed' : 'read-only'}. Press Ctrl+C to stop.`)}`,
+        `${s.bold('peerband')} ${s.dim(`${runtimeLabel} runtime, ${enableWrites ? 'messages allowed' : 'read-only'}. Press Ctrl+C to stop.`)}`,
       );
     }
     await runRemoteClient(core, credentials, {

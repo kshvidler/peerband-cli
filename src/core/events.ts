@@ -194,9 +194,10 @@ export class ConnectorEvents implements RelayEventChannel {
     const channel = noteChannel(input.channel);
     const agentId = input.agentId !== undefined
       ? await this.explicitAgent(input.agentId)
-      // A herdr-core terminal can inherit HERDR_PANE_ID from the Herdr pane that started the core, so both ids
-      // are tried; each runtime only recognises its own.
-      : (await this.resolveAgent(input.paneId)) ?? (await this.resolveAgent(input.terminalId));
+      // A herdr-core terminal inherits HERDR_PANE_ID from the Herdr pane that started the core, and a relay can
+      // serve both runtimes, so the terminal id wins when it names an agent. A Herdr app run inside a core
+      // terminal is the reverse case: that terminal is no agent, so its panes fall through to the pane id.
+      : (await this.resolveAgent(input.terminalId)) ?? (await this.resolveAgent(input.paneId));
     // The channel is echoed back so `peerband notify --channel` can tell this relay from one that ignores it.
     const echo = channel ? { channel } : {};
     if (!this.send) return { sent: false, agentId, ...echo };

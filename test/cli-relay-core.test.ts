@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { access, readFile } from 'node:fs/promises';
+import { access, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -33,7 +33,7 @@ async function machine() {
 afterEach(cleanupAll);
 
 describe('peerband relay --core', () => {
-  it('runs the relay for herdr-core in the background, once, and stops it', async () => {
+  it('runs the combined relay in the background, once, and stops it', async () => {
     const box = await machine();
     try {
       const started = await box.relay('--core');
@@ -41,10 +41,10 @@ describe('peerband relay --core', () => {
       expect(started.code).toBe(0);
       expect(started.stdout).toContain('PeerBand Relay is running in the background for herdr-core.');
       // The supervisor hands the runtime to its connector child and records it for status and repeat starts.
-      await eventually(async () => JSON.parse(await readFile(box.argsFile, 'utf8')).includes('herdr-core'));
-      expect(JSON.parse(await readFile(box.argsFile, 'utf8'))).toEqual(['connect', '--managed', '--runtime', 'herdr-core']);
+      await eventually(async () => JSON.parse(await readFile(box.argsFile, 'utf8')).includes('auto'));
+      expect(JSON.parse(await readFile(box.argsFile, 'utf8'))).toEqual(['connect', '--managed', '--runtime', 'auto']);
       const owner = JSON.parse(await readFile(join(box.home, 'relay-helper.lock', 'owner.json'), 'utf8')) as { runtime?: string };
-      expect(owner.runtime).toBe('herdr-core');
+      expect(owner.runtime).toBe('auto');
 
       const again = await box.relay('--core');
       expect(again.stdout).toContain('already running');
@@ -58,17 +58,24 @@ describe('peerband relay --core', () => {
     }
   }, 60_000);
 
-  it('refuses to start beside a running Herdr relay', async () => {
+  it('leaves a running Herdr relay alone: it serves herdr-core too, unless connector.json limits it', async () => {
     const box = await machine();
     try {
       // The Herdr plugin starts the supervisor without PEERBAND_RUNTIME.
       await execute(process.execPath, [lifecycle, 'start'], { env: { ...process.env, ...box.env, PEERBAND_RUNTIME: '' }, windowsHide: true });
       await eventually(async () => JSON.parse(await readFile(box.argsFile, 'utf8')).length > 0);
       expect(JSON.parse(await readFile(box.argsFile, 'utf8'))).toEqual(['connect', '--managed']);
+      const served = await box.relay('--core');
+      expect(served.code).toBe(0);
+      expect(served.stdout).toContain('A PeerBand Relay that serves herdr-core is already running.');
+      // No second supervisor: the Herdr relay's connector is the only one.
+      expect(JSON.parse(await readFile(box.argsFile, 'utf8'))).toEqual(['connect', '--managed']);
+
+      await writeFile(join(box.home, 'connector.json'), JSON.stringify({ runtime: 'herdr' }));
       const refused = await box.relay('--core');
       expect(refused.code).toBe(1);
-      expect(refused.stderr).toContain('A PeerBand relay for the Herdr terminal app is already running');
-      expect(refused.stderr).toContain('peerband relay --stop');
+      expect(refused.stderr).toContain('serves only the Herdr terminal app');
+      expect(refused.stderr).toContain('Remove that setting');
     } finally {
       await box.stop();
     }

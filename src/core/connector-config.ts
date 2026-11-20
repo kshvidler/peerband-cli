@@ -16,11 +16,11 @@ export interface HerdrCoreConnectorSettings {
   timeoutMs?: number;
 }
 
-export const RUNTIMES = ['herdr', 'herdr-core'] as const;
+export const RUNTIMES = ['auto', 'herdr', 'herdr-core'] as const;
 export type RuntimeName = typeof RUNTIMES[number];
 
 export interface ConnectorConfig {
-  /** Which runtime the connector serves: the Herdr TUI (default) or herdr-core. */
+  /** Which runtime the connector serves: auto (default: the Herdr TUI, plus herdr-core whenever it runs), herdr or herdr-core only. */
   runtime?: RuntimeName;
   allowedAgents?: string[];
   allowedWorkspaces?: string[];
