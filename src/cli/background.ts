@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { configHome } from '../core/index.js';
@@ -35,9 +36,13 @@ export async function runningRelayRuntime(env: NodeJS.ProcessEnv): Promise<strin
   return recordedRelayRuntime(env);
 }
 
-/** The plugin scripts ship next to the bundled CLI (dist/peerband.mjs and herdr/lifecycle.mjs in one package). */
+/**
+ * The plugin scripts ship next to the bundled CLI (dist/peerband.mjs and herdr/lifecycle.mjs in one package).
+ * A global npm install runs the CLI through a bin symlink, so resolve it to the package first.
+ */
 function lifecycleScript(ctx: Ctx): string {
-  const self = ctx.selfPath ?? process.argv[1] ?? '';
+  let self = ctx.selfPath ?? process.argv[1] ?? '';
+  try { self = realpathSync(self); } catch { /* keep the path as given */ }
   return join(resolve(dirname(self), '..'), 'herdr', 'lifecycle.mjs');
 }
 

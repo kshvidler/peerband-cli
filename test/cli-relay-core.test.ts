@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { access, readFile, writeFile } from 'node:fs/promises';
+import { access, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -76,6 +76,19 @@ describe('peerband relay --core', () => {
       expect(refused.code).toBe(1);
       expect(refused.stderr).toContain('serves only the Herdr terminal app');
       expect(refused.stderr).toContain('Remove that setting');
+    } finally {
+      await box.stop();
+    }
+  }, 60_000);
+
+  it.skipIf(process.platform === 'win32')('finds the plugin scripts through a bin symlink, as a global npm install runs it', async () => {
+    const box = await machine();
+    const bin = join(box.home, 'peerband');
+    await symlink(DIST, bin);
+    try {
+      const started = await runCli(['relay', '--core'], { env: box.env, overrides: { selfPath: bin } });
+      expect(started.stderr).toBe('');
+      expect(started.code).toBe(0);
     } finally {
       await box.stop();
     }
