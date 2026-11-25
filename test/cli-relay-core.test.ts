@@ -89,6 +89,10 @@ describe('peerband relay --core', () => {
       const started = await runCli(['relay', '--core'], { env: box.env, overrides: { selfPath: bin } });
       expect(started.stderr).toBe('');
       expect(started.code).toBe(0);
+      // Stop it and wait for it to exit, so the temp home can be removed.
+      await eventually(async () => JSON.parse(await readFile(box.argsFile, 'utf8')).includes('auto'));
+      expect((await box.relay('--stop')).stdout).toContain('PeerBand Relay stopped.');
+      await eventually(async () => { try { await access(join(box.home, 'relay-helper.lock')); return false; } catch { return true; } });
     } finally {
       await box.stop();
     }
