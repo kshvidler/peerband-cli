@@ -18,7 +18,8 @@ export const BACKGROUND_TAB_ID = 'hc-background-tab';
 export const BACKGROUND_SPACE_LABEL = 'Background';
 export const BACKGROUND_TAB_LABEL = 'Not in a tab';
 
-const LOCAL_ADDRESS = /^t[0-9]{1,12}$/;
+/** A local terminal address: `t` and a base-36 number (`t7`, `t1b`); remote ones look like `box/t3`. */
+export const LOCAL_ADDRESS = /^t[0-9a-z]{1,12}$/;
 const ID = /^[A-Za-z0-9][A-Za-z0-9:_-]{0,255}$/;
 const MAX_NODES = 10_000;
 

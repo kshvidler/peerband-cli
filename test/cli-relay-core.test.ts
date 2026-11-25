@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { access, readFile, writeFile } from 'node:fs/promises';
+import { access, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -76,6 +76,23 @@ describe('peerband relay --core', () => {
       expect(refused.code).toBe(1);
       expect(refused.stderr).toContain('serves only the Herdr terminal app');
       expect(refused.stderr).toContain('Remove that setting');
+    } finally {
+      await box.stop();
+    }
+  }, 60_000);
+
+  it.skipIf(process.platform === 'win32')('finds the plugin scripts through a bin symlink, as a global npm install runs it', async () => {
+    const box = await machine();
+    const bin = join(box.home, 'peerband');
+    await symlink(DIST, bin);
+    try {
+      const started = await runCli(['relay', '--core'], { env: box.env, overrides: { selfPath: bin } });
+      expect(started.stderr).toBe('');
+      expect(started.code).toBe(0);
+      // Stop it and wait for it to exit, so the temp home can be removed.
+      await eventually(async () => JSON.parse(await readFile(box.argsFile, 'utf8')).includes('auto'));
+      expect((await box.relay('--stop')).stdout).toContain('PeerBand Relay stopped.');
+      await eventually(async () => { try { await access(join(box.home, 'relay-helper.lock')); return false; } catch { return true; } });
     } finally {
       await box.stop();
     }

@@ -25,7 +25,7 @@ const appLayout = {
       { id: 'tab-a', name: 'Fixes', root: { id: 'r', type: 'row', children: [
         { id: 'p1', type: 'block', content: { terminal: 't1' } },
         { id: 'p2', type: 'block', content: { mod: 'notes', props: { terminal: 't9' } } },
-      ] }, floating: [{ pane: { id: 'q', type: 'block', content: { terminal: 't3' } }, rect: [0.2, 0.2, 0.6, 0.6] }] },
+      ] }, floating: [{ pane: { id: 'q', type: 'block', content: { terminal: 't1b' } }, rect: [0.2, 0.2, 0.6, 0.6] }] },
     ] },
     { id: 's2', name: '', folder: '/work/website', tabs: [{ id: 'tab-b', name: '', root: { id: 'c', type: 'column', children: [{ id: 'p3', type: 'block', content: { terminal: 't2' } }] } }] },
   ],
@@ -43,7 +43,7 @@ describe('herdr-core layout document', () => {
   it('maps terminals to spaces and tabs, ignoring mod props and remote addresses', () => {
     const layout = parseLayout(appLayout);
     expect(layout.byTerminal.get('t1')).toMatchObject({ space: { id: 's1', label: 'Backend', number: 1 }, tab: { id: 'tab-a', label: 'Fixes', number: 1 } });
-    expect(layout.byTerminal.get('t3')?.tab.id).toBe('tab-a');
+    expect(layout.byTerminal.get('t1b')?.tab.id).toBe('tab-a');
     // An unnamed space shows its folder, as the desktop app does.
     expect(layout.byTerminal.get('t2')).toMatchObject({ space: { label: 'website', number: 2 }, tab: { label: null } });
     expect(layout.byTerminal.has('t9')).toBe(false);
@@ -58,7 +58,7 @@ describe('HerdrCoreAdapter', () => {
     const { adapter } = setup([
       claude(),
       { address: 't2', name: null, argv: ['codex'], status: { state: 'error', app: 'codex' }, foreground: { name: 'codex.exe', cwd: 'C:\\work', pid: 7, argv: [] } },
-      { address: 't4', name: 'worker', status: { state: 'working', app: 'pi' } },
+      { address: 't2t4', name: 'worker', status: { state: 'working', app: 'pi' } },
       { address: 't5', name: 'shell', status: null },
       { address: 't6', status: { state: 'idle' }, state: 'finished' },
       { address: 'box/t3', status: { state: 'idle' } },
