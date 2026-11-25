@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { ConnectError, sanitizeOutput, type AgentRecord, type AgentStatus, type Capabilities, type OutputOptions, type OutputResult, type RuntimeAdapter, type RuntimeEvent, type RuntimeEventListener } from '../core/index.js';
 import type { EnvironmentResult } from '../core/environment.js';
-import { BACKGROUND_SPACE_ID, BACKGROUND_SPACE_LABEL, BACKGROUND_TAB_ID, BACKGROUND_TAB_LABEL, cleanLabel, emptyLayout, LAYOUT_DOC, parseLayout, type CoreLayout } from './layout.js';
+import { BACKGROUND_SPACE_ID, BACKGROUND_SPACE_LABEL, BACKGROUND_TAB_ID, BACKGROUND_TAB_LABEL, cleanLabel, emptyLayout, LAYOUT_DOC, LOCAL_ADDRESS, parseLayout, type CoreLayout } from './layout.js';
 import { attachOnlyStream, CoreConnection, CoreRpcClient, CoreRpcError, resolveCoreBinary, spawnCoreStream, type CoreNotification, type CoreStreamFactory } from './rpc.js';
 
 export interface HerdrCoreAdapterOptions {
@@ -35,7 +35,6 @@ interface CoreTerminal {
 
 interface LiveTarget { id: string; fingerprint: string; terminal: CoreTerminal }
 
-const LOCAL_ADDRESS = /^t[0-9]{1,12}$/;
 const PROTOCOL_GENERATION = 1;
 const REQUIRED_METHODS = ['terminal.list', 'terminal.get', 'terminal.read', 'terminal.send', 'events.subscribe', 'doc.get'];
 /** Facts that add, remove or replace an agent. `status` is handled on its own; `foreground` changes twice a second and is ignored. */
